@@ -34,7 +34,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             "Authorization: Bearer " . $idToken
         ]);
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-            "password" => $password
+            "password" => $passwordValue
         ]));
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
 
