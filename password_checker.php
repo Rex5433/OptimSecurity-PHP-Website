@@ -6,6 +6,9 @@ if (!isset($_SESSION["user_id"])) {
     exit;
 }
 
+require_once __DIR__ . "/config.php";
+require_once __DIR__ . "/fastapi_auth.php";
+
 $result = null;
 $error = "";
 $passwordValue = "";
@@ -20,7 +23,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             "password" => $passwordValue
         ]);
 
-        $ch = curl_init("http://127.0.0.1:8000/check-password");
+        $endpoint = rtrim($fastApiBaseUrl, "/") . "/check-password";
+        $idToken = getCloudRunIdToken($fastApiBaseUrl);
+        
+        $ch = curl_init($endpoint);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            "Content-Type: application/json",
+            "Authorization: Bearer " . $idToken
+        ]);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+            "password" => $password
+        ]));
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
 
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_POST, true);
