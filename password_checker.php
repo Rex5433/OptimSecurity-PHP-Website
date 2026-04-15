@@ -19,9 +19,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     if ($passwordValue === "") {
         $error = "Please enter a password.";
     } else {
-        $payload = json_encode([
-            "password" => $passwordValue
-        ]);
 
         $endpoint = rtrim($fastApiBaseUrl, "/") . "/check-password";
         $idToken = getCloudRunIdToken($fastApiBaseUrl);
@@ -37,14 +34,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             "password" => $passwordValue
         ]));
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            "Content-Type: application/json"
-        ]);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
 
         $response = curl_exec($ch);
 
