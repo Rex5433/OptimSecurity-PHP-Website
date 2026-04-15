@@ -18,8 +18,8 @@ include "db.php";
                 <a class="nav-link" href="homepage.php">Home</a>
                 <a class="nav-link" href="password_checker.php">Password Check</a>
                 <a class="nav-link" href="password_generator.php">Password Gen</a>
-                <a class="nav-link" href="phishing_toolkit.php">Phishing Toolkit</a>
                 <a class="nav-link" href="vault.php">Vault</a>
+                <a class="nav-link" href="phishing_toolkit.php">Phishing Toolkit</a>
                 <a class="nav-link active" href="about.php">About Me</a>
             </div>
 
