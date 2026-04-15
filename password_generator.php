@@ -167,7 +167,7 @@ include "db.php";
     <script>
         const form = document.getElementById("generatorForm");
         const generateBtn = document.getElementById("generateBtn");
-        const API_URL = "http://127.0.0.1:8000/generate-passwords";
+        const API_URL = "/generate_passwords_proxy.php";
         const candidateCountInput = document.getElementById("candidateCount");
         const candidateCountButtons = document.querySelectorAll(".generator-count-btn");
 
