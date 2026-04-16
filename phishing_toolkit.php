@@ -871,8 +871,8 @@ if ($analysisSeverity === 'high') {
 
             <div class="sidebar-spacer"></div>
 
-            <a class="nav-link" href="../security_settings.php">Security Settings</a>
-            <a class="nav-link" href="../Login/logout.php">Logout</a>
+            <a class="nav-link" href="security_settings.php">Security Settings</a>
+            <a class="nav-link" href="logout.php">Logout</a>
         </aside>
 
         <main class="main-content">
