@@ -117,7 +117,7 @@ if ($result) {
                 <div class="checker-sidebar-spacer"></div>
 
                 <a href="security_settings.php" class="checker-nav-item">Security Settings</a>
-                <a href="login.php" class="checker-nav-item logout">Logout</a>
+                <a href="logout.php" class="checker-nav-item logout">Logout</a>
             </nav>
         </aside>
 
