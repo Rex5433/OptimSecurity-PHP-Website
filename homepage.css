@@ -1017,3 +1017,37 @@ body {
         width: 100%;
     }
 }
+
+@media (max-width: 980px) {
+  .no-cve-row {
+    grid-template-columns: 18px 1fr;
+    gap: 14px;
+  }
+
+  .vuln-status-wrap,
+  .vuln-action-wrap {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .vuln-status-wrap {
+    grid-row: 2;
+  }
+
+  .vuln-action-wrap {
+    grid-row: 3;
+  }
+
+  .vuln-summary {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 700px) {
+  .severity-pill,
+  .vuln-action {
+    min-width: 0;
+    width: fit-content;
+    max-width: 100%;
+  }
+}
