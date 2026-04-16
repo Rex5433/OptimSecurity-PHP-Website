@@ -675,3 +675,37 @@ body.vault-body {
         width: 100%;
     }
 }
+
+
+@media (max-width: 700px) {
+    .vault-modal-backdrop {
+        align-items: flex-start;
+        justify-content: center;
+        padding: 12px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .vault-modal,
+    .vault-modal.wide {
+        width: 100%;
+        max-width: 100%;
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 18px;
+        border-radius: 10px;
+    }
+
+    .vault-modal h2 {
+        font-size: 24px;
+        margin-bottom: 14px;
+    }
+
+    .vault-actions-row {
+        position: sticky;
+        bottom: 0;
+        background: #0d2534;
+        padding-top: 12px;
+    }
+}
