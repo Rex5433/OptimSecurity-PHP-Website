@@ -25,7 +25,7 @@ include "db.php";
                 <div class="generator-sidebar-spacer"></div>
 
                 <a href="security_settings.php" class="generator-nav-item">Security Settings</a>
-                <a href="login.php" class="generator-nav-item logout">Logout</a>
+                <a href="logout.php" class="generator-nav-item logout">Logout</a>
             </nav>
         </aside>
 
