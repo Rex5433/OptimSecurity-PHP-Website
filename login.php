@@ -89,7 +89,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $message = "Please fill in all fields.";
 
         logAttackEvent(
-            "failed_login",
+            "failed_login_form_error",
             "medium",
             "login.php",
             [
