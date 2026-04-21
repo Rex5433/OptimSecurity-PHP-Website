@@ -911,53 +911,56 @@ body {
     z-index: 20;
 }
 
-@media (max-width: 1650px) {
+@media (max-width: 1800px) {
     .tertiary-grid {
         grid-template-columns: repeat(2, 1fr);
     }
 
     .no-cve-row {
-        grid-template-columns: 18px minmax(0, 1fr);
-        grid-template-areas:
-            "dot main"
-            "dot status"
-            "dot action";
-        column-gap: 14px;
-        row-gap: 12px;
-        align-items: start;
+        grid-template-columns: 18px minmax(0, 1fr) !important;
+        column-gap: 14px !important;
+        row-gap: 12px !important;
+        align-items: start !important;
     }
 
-    .row-dot {
-        grid-area: dot;
-        align-self: center;
+    .no-cve-row > .row-dot {
+        grid-column: 1 !important;
+        grid-row: 1 / span 3 !important;
+        align-self: center !important;
     }
 
-    .vuln-main {
-        grid-area: main;
-        min-width: 0;
+    .no-cve-row > .vuln-main {
+        grid-column: 2 !important;
+        grid-row: 1 !important;
+        min-width: 0 !important;
+        width: 100% !important;
     }
 
-    .vuln-status-wrap {
-        grid-area: status;
-        justify-content: flex-start;
-        min-width: 0;
+    .no-cve-row > .vuln-status-wrap {
+        grid-column: 2 !important;
+        grid-row: 2 !important;
+        justify-content: flex-start !important;
+        min-width: 0 !important;
+        width: 100% !important;
     }
 
-    .vuln-action-wrap {
-        grid-area: action;
-        justify-content: flex-start;
-        min-width: 0;
+    .no-cve-row > .vuln-action-wrap {
+        grid-column: 2 !important;
+        grid-row: 3 !important;
+        justify-content: flex-start !important;
+        min-width: 0 !important;
+        width: 100% !important;
     }
 
     .severity-pill,
     .vuln-action {
-        min-width: 0;
-        width: fit-content;
-        max-width: 100%;
+        min-width: 0 !important;
+        width: max-content !important;
+        max-width: 100% !important;
     }
 
     .vuln-summary {
-        max-width: 100%;
+        max-width: 100% !important;
     }
 }
 
