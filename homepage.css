@@ -917,7 +917,47 @@ body {
     }
 
     .no-cve-row {
-        grid-template-columns: 18px minmax(0, 1fr) 170px 170px;
+        grid-template-columns: 18px minmax(0, 1fr);
+        grid-template-areas:
+            "dot main"
+            "dot status"
+            "dot action";
+        column-gap: 14px;
+        row-gap: 12px;
+        align-items: start;
+    }
+
+    .row-dot {
+        grid-area: dot;
+        align-self: center;
+    }
+
+    .vuln-main {
+        grid-area: main;
+        min-width: 0;
+    }
+
+    .vuln-status-wrap {
+        grid-area: status;
+        justify-content: flex-start;
+        min-width: 0;
+    }
+
+    .vuln-action-wrap {
+        grid-area: action;
+        justify-content: flex-start;
+        min-width: 0;
+    }
+
+    .severity-pill,
+    .vuln-action {
+        min-width: 0;
+        width: fit-content;
+        max-width: 100%;
+    }
+
+    .vuln-summary {
+        max-width: 100%;
     }
 }
 
@@ -940,20 +980,6 @@ body {
 
     .dash-title-box h1 {
         font-size: 30px;
-    }
-
-    .no-cve-row {
-        grid-template-columns: 18px 1fr;
-        gap: 14px;
-    }
-
-    .vuln-status-wrap,
-    .vuln-action-wrap {
-        justify-content: flex-start;
-    }
-
-    .vuln-summary {
-        max-width: 100%;
     }
 }
 
