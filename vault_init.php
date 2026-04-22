@@ -52,13 +52,17 @@ $vaultIterations = (int) ($body["vault_iterations"] ?? 0);
 $vaultKeyCheck = trim((string) ($body["vault_key_check"] ?? ""));
 $wrappedVaultKey = trim((string) ($body["wrapped_vault_key"] ?? ""));
 $wrappedVaultKeyIv = trim((string) ($body["wrapped_vault_key_iv"] ?? ""));
+$wrappedVaultKeyRecovery = trim((string) ($body["wrapped_vault_key_recovery"] ?? ""));
+$wrappedVaultKeyRecoveryIv = trim((string) ($body["wrapped_vault_key_recovery_iv"] ?? ""));
 
 if (
     $vaultSalt === "" ||
     $vaultIterations <= 0 ||
     $vaultKeyCheck === "" ||
     $wrappedVaultKey === "" ||
-    $wrappedVaultKeyIv === ""
+    $wrappedVaultKeyIv === "" ||
+    $wrappedVaultKeyRecovery === "" ||
+    $wrappedVaultKeyRecoveryIv === ""
 ) {
     http_response_code(400);
     echo json_encode([
@@ -76,7 +80,9 @@ try {
             vault_iterations,
             vault_key_check,
             wrapped_vault_key,
-            wrapped_vault_key_iv
+            wrapped_vault_key_iv,
+            wrapped_vault_key_recovery,
+            wrapped_vault_key_recovery_iv
         )
         VALUES (
             :user_id,
@@ -84,7 +90,9 @@ try {
             :vault_iterations,
             :vault_key_check,
             :wrapped_vault_key,
-            :wrapped_vault_key_iv
+            :wrapped_vault_key_iv,
+            :wrapped_vault_key_recovery,
+            :wrapped_vault_key_recovery_iv
         )
         ON CONFLICT (user_id)
         DO UPDATE SET
@@ -92,7 +100,10 @@ try {
             vault_iterations = EXCLUDED.vault_iterations,
             vault_key_check = EXCLUDED.vault_key_check,
             wrapped_vault_key = EXCLUDED.wrapped_vault_key,
-            wrapped_vault_key_iv = EXCLUDED.wrapped_vault_key_iv
+            wrapped_vault_key_iv = EXCLUDED.wrapped_vault_key_iv,
+            wrapped_vault_key_recovery = EXCLUDED.wrapped_vault_key_recovery,
+            wrapped_vault_key_recovery_iv = EXCLUDED.wrapped_vault_key_recovery_iv,
+            updated_at = NOW()
     ');
 
     $stmt->execute([
@@ -101,7 +112,9 @@ try {
         'vault_iterations' => $vaultIterations,
         'vault_key_check' => $vaultKeyCheck,
         'wrapped_vault_key' => $wrappedVaultKey,
-        'wrapped_vault_key_iv' => $wrappedVaultKeyIv
+        'wrapped_vault_key_iv' => $wrappedVaultKeyIv,
+        'wrapped_vault_key_recovery' => $wrappedVaultKeyRecovery,
+        'wrapped_vault_key_recovery_iv' => $wrappedVaultKeyRecoveryIv
     ]);
 
     echo json_encode([
