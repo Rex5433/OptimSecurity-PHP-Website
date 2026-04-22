@@ -23,6 +23,7 @@ $username = (string) $_SESSION["password_reset_username"];
 $message = "";
 $success = "";
 $newRecoveryKeyToShow = "";
+$vaultWasReset = false;
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $newPassword = $_POST["new_password"] ?? "";
@@ -57,6 +58,37 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 'id' => $userId
             ]);
 
+            $checkVaultProfileStmt = $pdo->prepare('
+                SELECT 1
+                FROM public.vault_profile
+                WHERE user_id = :user_id
+                LIMIT 1
+            ');
+            $checkVaultProfileStmt->execute([
+                'user_id' => $userId
+            ]);
+            $vaultExists = (bool) $checkVaultProfileStmt->fetchColumn();
+
+            if ($vaultExists) {
+                $deleteVaultItemsStmt = $pdo->prepare('
+                    DELETE FROM public.vault_item
+                    WHERE user_id = :user_id
+                ');
+                $deleteVaultItemsStmt->execute([
+                    'user_id' => $userId
+                ]);
+
+                $deleteVaultProfileStmt = $pdo->prepare('
+                    DELETE FROM public.vault_profile
+                    WHERE user_id = :user_id
+                ');
+                $deleteVaultProfileStmt->execute([
+                    'user_id' => $userId
+                ]);
+
+                $vaultWasReset = true;
+            }
+
             markRecoveryKeyUsed($pdo, $userId);
 
             $newRecoveryKey = generateRecoveryKey();
@@ -70,6 +102,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             $newRecoveryKeyToShow = $newRecoveryKey;
             $success = "Password reset successful. Save your new recovery key now.";
+
+            $_SESSION["vault_password_reset_notice"] = $vaultWasReset
+                ? "Your vault was reset during password recovery because the previous encrypted vault key could not be safely rewrapped without your old password."
+                : "";
 
             unset($_SESSION["password_reset_user_id"], $_SESSION["password_reset_username"]);
         } catch (Throwable $e) {
@@ -114,6 +150,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             text-align: center;
             line-height: 1.5;
         }
+
+        .vault-warning {
+            margin-top: 16px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 170, 80, 0.35);
+            background: rgba(255, 170, 80, 0.10);
+            color: #ffe2bf;
+            line-height: 1.5;
+        }
     </style>
 </head>
 <body>
@@ -134,6 +180,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <?php endif; ?>
 
             <?php if ($newRecoveryKeyToShow !== ""): ?>
+                <?php if ($vaultWasReset): ?>
+                    <div class="vault-warning">
+                        Your encrypted vault was reset during recovery. Since this password reset did not use your old password,
+                        the previous vault key could not be safely rewrapped.
+                    </div>
+                <?php endif; ?>
+
                 <div class="recovery-key-box">
                     <?= htmlspecialchars($newRecoveryKeyToShow) ?>
                 </div>
