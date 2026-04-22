@@ -175,7 +175,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     </div>
 
                     <div class="form-group">
-                        <label>Password (minimum 8 characters, upper/lowercase, number & symbol)</label>
+                        <label>Password</label>
+                        <div class="password-note">
+                            Minimum 8 characters with uppercase, lowercase, number, and symbol.
+                        </div>
                         <input
                             type="<?= $show_passwords ? 'text' : 'password' ?>"
                             name="password"
