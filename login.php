@@ -204,6 +204,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 <div class="login-wrapper">
     <div class="login-box">
+
+        <div class="login-logo">
+            <img src="optimsecuritylogo.png" alt="Optimsecurity Logo">
+        </div>
+
         <h1>Login</h1>
 
         <?php if ($message): ?>

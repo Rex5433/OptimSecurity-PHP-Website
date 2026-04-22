@@ -251,3 +251,20 @@ input:focus {
         align-items: flex-start;
     }
 }
+
+/* LOGIN LOGO */
+
+.login-logo {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 22px;
+    position: relative;
+    z-index: 1;
+}
+
+.login-logo img {
+    width: 100%;
+    max-width: 320px;
+    height: auto;
+    object-fit: contain;
+}
