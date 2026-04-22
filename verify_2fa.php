@@ -83,7 +83,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             $valid = false;
 
-            // Standard authenticator code
             if (preg_match('/^\d{6}$/', $code)) {
                 $valid = verifyTotpCode(
                     $twofaSecret,
@@ -95,7 +94,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 );
             }
 
-            // Backup code fallback
             if (!$valid) {
                 $valid = consumeBackupCode($pdo, $pendingUserId, $code);
             }
@@ -115,6 +113,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $_SESSION["pending_2fa_verified_at"]
                 );
 
+                // This is the event your homepage chart expects
+                logAttackEvent(
+                    "successful_login",
+                    "low",
+                    "verify_2fa.php",
+                    [
+                        "userId" => $user["id"],
+                        "username" => $user["username"]
+                    ]
+                );
+
+                // Optional extra audit event for specifically tracking 2FA completions
                 logAttackEvent(
                     "successful_2fa_login",
                     "low",
@@ -157,6 +167,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     "verify_2fa.php",
                     [
                         "userId" => $pendingUserId,
+                        "username" => $pendingUsername,
                         "reason" => "Invalid TOTP or backup code"
                     ]
                 );
