@@ -771,7 +771,7 @@ body {
 
 .weekly-chart-box {
     padding: 18px 16px 20px;
-    min-height: 320px;
+    min-height: 360px;
 }
 
 .weekly-chart-topline {
@@ -786,11 +786,11 @@ body {
 
 .attack-week-chart {
     position: relative;
-    height: 420px;
+    height: 300px;
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     gap: 18px;
-    padding: 12px 18px 14px 28px;
+    padding: 10px 18px 12px 18px;
     border-left: 1px solid rgba(170, 205, 225, 0.15);
     border-bottom: 1px solid rgba(170, 205, 225, 0.15);
     background-image: linear-gradient(to top, rgba(255,255,255,0.08) 1px, transparent 1px);
@@ -802,7 +802,7 @@ body {
 
 .attack-week-col {
     display: grid;
-    grid-template-rows: 250px auto auto auto;
+    grid-template-rows: 170px 24px 34px 24px;
     align-items: end;
     justify-items: center;
     min-width: 0;
@@ -820,18 +820,18 @@ body {
 }
 
 .attack-week-plot {
-    height: 250px;
+    height: 170px;
     width: 100%;
     display: flex;
     align-items: end;
     justify-content: center;
-    overflow: visible;
+    overflow: hidden;
 }
 
 .attack-week-bar {
     width: 62px;
     min-height: 0;
-    max-height: 250px;
+    max-height: 160px;
     border-radius: 18px 18px 8px 8px;
     background: linear-gradient(180deg, #59e3cb 0%, #31cfad 100%);
     box-shadow: 0 14px 34px rgba(49, 207, 173, 0.22);
@@ -1023,22 +1023,22 @@ body {
 
 @media (max-width: 900px) {
     .attack-week-chart {
-        height: 360px;
-        gap: 12px;
-        padding: 10px 10px 12px 18px;
+        height: 260px;
+        gap: 10px;
+        padding: 10px 10px 12px 12px;
     }
 
     .attack-week-col {
-        grid-template-rows: 210px auto auto auto;
+        grid-template-rows: 130px 20px 28px 20px;
     }
 
     .attack-week-plot {
-        height: 210px;
+        height: 130px;
     }
 
     .attack-week-bar {
-        width: 46px;
-        max-height: 210px;
+        width: 42px;
+        max-height: 120px;
     }
 
     .activity-footer-strip {
@@ -1067,7 +1067,12 @@ body {
     }
 
     .attack-live-stats {
-        grid-template-columns: 1fr;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+        margin-top: 18px;
+        position: relative;
+        z-index: 3;
     }
 
     .severity-pill,
