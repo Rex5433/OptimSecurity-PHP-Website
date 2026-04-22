@@ -11,19 +11,6 @@ if (!isset($_SESSION["user_id"])) {
     exit;
 }
 
-if (
-    empty($_SERVER["HTTP_X_CSRF_TOKEN"]) ||
-    empty($_SESSION["csrf_token"]) ||
-    !hash_equals($_SESSION["csrf_token"], $_SERVER["HTTP_X_CSRF_TOKEN"])
-) {
-    http_response_code(403);
-    echo json_encode([
-        "ok" => false,
-        "error" => "Invalid CSRF token."
-    ]);
-    exit;
-}
-
 require_once "db.php";
 
 if (!$pdo) {
@@ -35,96 +22,27 @@ if (!$pdo) {
     exit;
 }
 
-$body = json_decode(file_get_contents("php://input"), true);
-
-if (!is_array($body)) {
-    http_response_code(400);
-    echo json_encode([
-        "ok" => false,
-        "error" => "Invalid JSON payload."
-    ]);
-    exit;
-}
-
-$userId = (int) $_SESSION["user_id"];
-$vaultSalt = trim((string) ($body["vault_salt"] ?? ""));
-$vaultIterations = (int) ($body["vault_iterations"] ?? 0);
-$vaultKeyCheck = trim((string) ($body["vault_key_check"] ?? ""));
-$wrappedVaultKey = trim((string) ($body["wrapped_vault_key"] ?? ""));
-$wrappedVaultKeyIv = trim((string) ($body["wrapped_vault_key_iv"] ?? ""));
-$wrappedVaultKeyRecovery = trim((string) ($body["wrapped_vault_key_recovery"] ?? ""));
-$wrappedVaultKeyRecoveryIv = trim((string) ($body["wrapped_vault_key_recovery_iv"] ?? ""));
-
-if (
-    $vaultSalt === "" ||
-    $vaultIterations <= 0 ||
-    $vaultKeyCheck === "" ||
-    $wrappedVaultKey === "" ||
-    $wrappedVaultKeyIv === "" ||
-    $wrappedVaultKeyRecovery === "" ||
-    $wrappedVaultKeyRecoveryIv === ""
-) {
-    http_response_code(400);
-    echo json_encode([
-        "ok" => false,
-        "error" => "Missing vault profile fields."
-    ]);
-    exit;
-}
-
 try {
     $stmt = $pdo->prepare('
-        INSERT INTO public.vault_profile (
-            user_id,
-            vault_salt,
-            vault_iterations,
-            vault_key_check,
-            wrapped_vault_key,
-            wrapped_vault_key_iv,
-            wrapped_vault_key_recovery,
-            wrapped_vault_key_recovery_iv
-        )
-        VALUES (
-            :user_id,
-            :vault_salt,
-            :vault_iterations,
-            :vault_key_check,
-            :wrapped_vault_key,
-            :wrapped_vault_key_iv,
-            :wrapped_vault_key_recovery,
-            :wrapped_vault_key_recovery_iv
-        )
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-            vault_salt = EXCLUDED.vault_salt,
-            vault_iterations = EXCLUDED.vault_iterations,
-            vault_key_check = EXCLUDED.vault_key_check,
-            wrapped_vault_key = EXCLUDED.wrapped_vault_key,
-            wrapped_vault_key_iv = EXCLUDED.wrapped_vault_key_iv,
-            wrapped_vault_key_recovery = EXCLUDED.wrapped_vault_key_recovery,
-            wrapped_vault_key_recovery_iv = EXCLUDED.wrapped_vault_key_recovery_iv,
-            updated_at = NOW()
+        SELECT id, item_name, item_type, folder_name, encrypted_data, iv, created_at, updated_at
+        FROM public.vault_item
+        WHERE user_id = :user_id
+        ORDER BY id DESC
     ');
-
     $stmt->execute([
-        'user_id' => $userId,
-        'vault_salt' => $vaultSalt,
-        'vault_iterations' => $vaultIterations,
-        'vault_key_check' => $vaultKeyCheck,
-        'wrapped_vault_key' => $wrappedVaultKey,
-        'wrapped_vault_key_iv' => $wrappedVaultKeyIv,
-        'wrapped_vault_key_recovery' => $wrappedVaultKeyRecovery,
-        'wrapped_vault_key_recovery_iv' => $wrappedVaultKeyRecoveryIv
+        ':user_id' => (int) $_SESSION["user_id"]
     ]);
 
+    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
     echo json_encode([
-        "ok" => true
+        "ok" => true,
+        "items" => $items
     ]);
 } catch (Throwable $e) {
     http_response_code(500);
     echo json_encode([
         "ok" => false,
-        "error" => "Could not initialize vault profile.",
-        "debug" => $e->getMessage()
+        "error" => $e->getMessage()
     ]);
 }
