@@ -181,6 +181,7 @@ body {
 
 .dash-grid-top,
 .dash-grid-bottom {
+    align-items: start;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 20px;
@@ -192,6 +193,8 @@ body {
     border-radius: 10px;
     padding: 20px;
     box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+    height: fit-content;
+    align-self: start;
 }
 
 .card-header h2 {
