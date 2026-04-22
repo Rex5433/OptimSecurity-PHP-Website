@@ -202,7 +202,7 @@ function buildAttackMetrics(PDO $pdo): array
         "isoDates" => $isoDates,
         "currentCount" => (int) $todayCount,
         "weekCount" => $weekCount,
-        "latestType" => "Activity Recorded"
+        "latestType" => "Successful Login"
     ];
 }
 
@@ -400,59 +400,27 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     <div class="attack-live-stats">
                         <div class="attack-mini-card">
                             <span class="attack-mini-label">Today</span>
-                            <span class="attack-mini-value"
-                                id="attackCurrentCount"><?= (int) $attackMetrics["currentCount"] ?></span>
+                            <span class="attack-mini-value" id="attackCurrentCount"><?= (int) $attackMetrics["currentCount"] ?></span>
                         </div>
 
                         <div class="attack-mini-card">
                             <span class="attack-mini-label">This Week</span>
-                            <span class="attack-mini-value"
-                                id="attackWeekCount"><?= (int) $attackMetrics["weekCount"] ?></span>
+                            <span class="attack-mini-value" id="attackWeekCount"><?= (int) $attackMetrics["weekCount"] ?></span>
                         </div>
                     </div>
 
-                    <div class="chart-meta" id="attackTrendMeta">
-                        Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
-                    </div>
-
-                    <div class="activity-summary-box" id="activitySummaryBox">
-                        <div class="activity-summary-top">
-                            <div>
-                                <div class="activity-summary-title">Selected Day</div>
-                                <div class="activity-summary-date" id="activitySummaryDate">Click a bar to view details</div>
-                            </div>
-
-                            <div class="activity-summary-total">
-                                <span class="activity-summary-total-label">Events</span>
-                                <span class="activity-summary-total-value" id="activitySummaryTotal">0</span>
+                    <div class="activity-footer-strip" id="activityFooterStrip">
+                        <div class="activity-footer-left">
+                            <div class="activity-footer-icon">✓</div>
+                            <div class="activity-footer-copy">
+                                <div class="activity-footer-title">Latest: Successful Login</div>
+                                <div class="activity-footer-meta" id="activityFooterMeta">Click a bar to load details.</div>
                             </div>
                         </div>
 
-                        <div class="activity-summary-grid">
-                            <div class="activity-summary-item">
-                                <span class="activity-summary-label">IP Address</span>
-                                <strong id="activitySummaryIp">N/A</strong>
-                            </div>
-
-                            <div class="activity-summary-item">
-                                <span class="activity-summary-label">Location</span>
-                                <strong id="activitySummaryLocation">N/A</strong>
-                            </div>
-
-                            <div class="activity-summary-item">
-                                <span class="activity-summary-label">Event</span>
-                                <strong id="activitySummaryEvent">N/A</strong>
-                            </div>
-
-                            <div class="activity-summary-item">
-                                <span class="activity-summary-label">Time</span>
-                                <strong id="activitySummaryTime">N/A</strong>
-                            </div>
-                        </div>
-
-                        <div class="activity-summary-note" id="activitySummaryNote">
-                            Click any day bar above.
-                        </div>
+                        <button type="button" class="activity-footer-btn" id="activityFooterBtn">
+                            View Details
+                        </button>
                     </div>
                 </div>
             </section>
@@ -585,22 +553,17 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
         const liveUpdateLabel = document.getElementById("liveUpdateLabel");
         const manualRefreshBtn = document.getElementById("manualRefreshBtn");
         const attackWeekChart = document.getElementById("attackWeekChart");
-        const attackTrendMeta = document.getElementById("attackTrendMeta");
         const attackCurrentCount = document.getElementById("attackCurrentCount");
         const attackWeekCount = document.getElementById("attackWeekCount");
-
-        const activitySummaryDate = document.getElementById("activitySummaryDate");
-        const activitySummaryTotal = document.getElementById("activitySummaryTotal");
-        const activitySummaryIp = document.getElementById("activitySummaryIp");
-        const activitySummaryLocation = document.getElementById("activitySummaryLocation");
-        const activitySummaryEvent = document.getElementById("activitySummaryEvent");
-        const activitySummaryTime = document.getElementById("activitySummaryTime");
-        const activitySummaryNote = document.getElementById("activitySummaryNote");
+        const activityFooterMeta = document.getElementById("activityFooterMeta");
+        const activityFooterBtn = document.getElementById("activityFooterBtn");
 
         const tipsList = document.getElementById("tipsList");
         const tipsSearch = document.getElementById("tipsSearch");
         const shuffleTipsBtn = document.getElementById("shuffleTipsBtn");
         const tipsEmptyState = document.getElementById("tipsEmptyState");
+
+        let selectedDayDetails = null;
 
         function escapeHtml(text) {
             const div = document.createElement("div");
@@ -662,41 +625,33 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
             });
         }
 
-        function renderActivityDetails(payload) {
+        function renderFooterDetails(payload) {
             const rows = Array.isArray(payload.rows) ? payload.rows : [];
-            const label = payload.label || "Selected Day";
-            const total = Number(payload.total || 0);
             const first = rows.length ? rows[0] : null;
-
-            activitySummaryDate.textContent = label;
-            activitySummaryTotal.textContent = String(total);
+            const total = Number(payload.total || 0);
 
             if (!first) {
-                activitySummaryIp.textContent = "N/A";
-                activitySummaryLocation.textContent = "N/A";
-                activitySummaryEvent.textContent = "N/A";
-                activitySummaryTime.textContent = "N/A";
-                activitySummaryNote.textContent = "No activity details found for this day.";
+                selectedDayDetails = null;
+                activityFooterMeta.textContent = `${payload.label || "Selected Day"} • No details found`;
                 return;
             }
 
-            activitySummaryIp.textContent = first.ip || "N/A";
-            activitySummaryLocation.textContent = first.location || "Unknown";
-            activitySummaryEvent.textContent = first.event_type || "Login Activity";
-            activitySummaryTime.textContent = first.created_at || "N/A";
-            activitySummaryNote.textContent = total > 1
-                ? `Showing latest event out of ${total} total events for this day.`
-                : "Showing latest event for this day.";
+            selectedDayDetails = {
+                label: payload.label || "Selected Day",
+                total,
+                ip: first.ip || "N/A",
+                location: first.location || "Unknown",
+                eventType: first.event_type || "Login Activity",
+                time: first.created_at || "N/A",
+                userAgent: first.user_agent || "N/A"
+            };
+
+            activityFooterMeta.textContent =
+                `${selectedDayDetails.time} • ${selectedDayDetails.ip} • ${selectedDayDetails.location} • ${selectedDayDetails.eventType}`;
         }
 
         async function openActivityDay(dayIso, label) {
-            activitySummaryDate.textContent = label;
-            activitySummaryTotal.textContent = "...";
-            activitySummaryIp.textContent = "Loading...";
-            activitySummaryLocation.textContent = "Loading...";
-            activitySummaryEvent.textContent = "Loading...";
-            activitySummaryTime.textContent = "Loading...";
-            activitySummaryNote.textContent = "Loading day details...";
+            activityFooterMeta.textContent = `${label} • Loading details...`;
 
             try {
                 const response = await fetch("login_activity_day.php?day=" + encodeURIComponent(dayIso) + "&ts=" + Date.now(), {
@@ -708,14 +663,10 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 }
 
                 const data = await response.json();
-                renderActivityDetails(data);
+                renderFooterDetails(data);
             } catch (error) {
-                activitySummaryTotal.textContent = "0";
-                activitySummaryIp.textContent = "N/A";
-                activitySummaryLocation.textContent = "N/A";
-                activitySummaryEvent.textContent = "N/A";
-                activitySummaryTime.textContent = "N/A";
-                activitySummaryNote.textContent = "Could not load day details.";
+                selectedDayDetails = null;
+                activityFooterMeta.textContent = `${label} • Could not load day details.`;
             }
         }
 
@@ -736,11 +687,11 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 ? isoDates
                 : ["", "", "", "", "", "", ""];
 
-            const maxValue = Math.max(...safeSeries, 0);
-            const latestIndex = safeSeries.length - 1;
-            const hasAnyData = maxValue > 0;
+            const maxValue = Math.max(...safeSeries, 1);
+            const chartTop = Math.max(maxValue + 1, 5);
 
             attackWeekChart.innerHTML = "";
+            attackWeekChart.style.setProperty("--chart-top", String(chartTop));
 
             safeSeries.forEach((value, index) => {
                 const button = document.createElement("button");
@@ -748,7 +699,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 button.className = "attack-week-col";
                 button.setAttribute("aria-label", `${safeLabels[index]} ${safeDates[index]}: ${value} events`);
 
-                if (index === latestIndex) {
+                if (index === safeSeries.length - 1) {
                     button.classList.add("active-day");
                 }
 
@@ -758,16 +709,9 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 const bar = document.createElement("div");
                 bar.className = "attack-week-bar";
 
-                let percent = 0;
-
-                if (hasAnyData) {
-                    percent = value > 0 ? Math.max((value / maxValue) * 100, 8) : 0;
-                } else {
-                    percent = 2.5;
-                    bar.classList.add("zero-bar");
-                }
-
-                bar.style.height = `${percent}%`;
+                const valueLabel = document.createElement("div");
+                valueLabel.className = "attack-week-value";
+                valueLabel.textContent = String(value);
 
                 const day = document.createElement("div");
                 day.className = "attack-week-day";
@@ -777,8 +721,16 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 date.className = "attack-week-date";
                 date.textContent = safeDates[index];
 
+                const percent = value > 0 ? (value / chartTop) * 100 : 0;
+                bar.style.height = `${percent}%`;
+
+                if (value === 0) {
+                    bar.classList.add("zero-bar");
+                }
+
                 plot.appendChild(bar);
                 button.appendChild(plot);
+                button.appendChild(valueLabel);
                 button.appendChild(day);
                 button.appendChild(date);
 
@@ -789,20 +741,12 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 
                 attackWeekChart.appendChild(button);
             });
-
-            if (!hasAnyData) {
-                const empty = document.createElement("div");
-                empty.className = "attack-week-empty";
-                empty.textContent = "No activity this week";
-                attackWeekChart.appendChild(empty);
-            }
         }
 
         function updateAttackActivity(series, labels, dates, isoDates, latestType, currentCount, weekCount) {
             renderAttackWeek(series, labels, dates, isoDates);
             attackCurrentCount.textContent = String(currentCount ?? 0);
             attackWeekCount.textContent = String(weekCount ?? 0);
-            attackTrendMeta.textContent = `Latest: ${latestType || "No Recent Activity"}`;
         }
 
         function updateDashboard(data) {
@@ -944,6 +888,22 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 
         tipsSearch.addEventListener("input", function () {
             searchTips();
+        });
+
+        activityFooterBtn.addEventListener("click", function () {
+            if (!selectedDayDetails) {
+                return;
+            }
+
+            alert(
+                `Selected Day: ${selectedDayDetails.label}\n` +
+                `Events: ${selectedDayDetails.total}\n` +
+                `IP: ${selectedDayDetails.ip}\n` +
+                `Location: ${selectedDayDetails.location}\n` +
+                `Event: ${selectedDayDetails.eventType}\n` +
+                `Time: ${selectedDayDetails.time}\n` +
+                `Device: ${selectedDayDetails.userAgent}`
+            );
         });
 
         async function fetchDashboardData(showStatus = true) {
