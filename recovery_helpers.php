@@ -25,13 +25,13 @@ function upsertRecoveryKey(PDO $pdo, int $userId, string $plainKey): bool
 
     $sql = '
         INSERT INTO public.account_recovery_keys (user_id, recovery_key_hash, created_at, used_at, rotated_at)
-        VALUES (:user_id, :recovery_key_hash, now(), NULL, NULL)
+        VALUES (:user_id, :recovery_key_hash, NOW(), NULL, NOW())
         ON CONFLICT (user_id)
         DO UPDATE SET
             recovery_key_hash = EXCLUDED.recovery_key_hash,
-            created_at = now(),
+            created_at = NOW(),
             used_at = NULL,
-            rotated_at = now()
+            rotated_at = NOW()
     ';
 
     $stmt = $pdo->prepare($sql);
@@ -40,6 +40,11 @@ function upsertRecoveryKey(PDO $pdo, int $userId, string $plainKey): bool
         'user_id' => $userId,
         'recovery_key_hash' => $hash
     ]);
+}
+
+function saveRecoveryKey(PDO $pdo, int $userId, string $plainKey): bool
+{
+    return upsertRecoveryKey($pdo, $userId, $plainKey);
 }
 
 function getRecoveryRowByUsername(PDO $pdo, string $username): ?array
@@ -64,10 +69,37 @@ function markRecoveryKeyUsed(PDO $pdo, int $userId): void
 {
     $stmt = $pdo->prepare('
         UPDATE public.account_recovery_keys
-        SET used_at = now()
+        SET used_at = NOW()
         WHERE user_id = :user_id
     ');
     $stmt->execute(['user_id' => $userId]);
+}
+
+function userHasRecoveryKey(PDO $pdo, int $userId): bool
+{
+    $stmt = $pdo->prepare('
+        SELECT 1
+        FROM public.account_recovery_keys
+        WHERE user_id = :user_id
+        LIMIT 1
+    ');
+    $stmt->execute(['user_id' => $userId]);
+
+    return (bool) $stmt->fetchColumn();
+}
+
+function getRecoveryKeyCreatedAt(PDO $pdo, int $userId): ?string
+{
+    $stmt = $pdo->prepare('
+        SELECT COALESCE(rotated_at, created_at)
+        FROM public.account_recovery_keys
+        WHERE user_id = :user_id
+        LIMIT 1
+    ');
+    $stmt->execute(['user_id' => $userId]);
+
+    $value = $stmt->fetchColumn();
+    return $value ?: null;
 }
 
 function buildRecoveryFileContent(string $username, string $recoveryKey): string
