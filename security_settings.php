@@ -483,6 +483,11 @@ if ($activeTwofaSecret !== '') {
                                 : "Not Set" ?>
                         </span>
                     </div>
+
+                    <div class="vault-stat-card">
+                        <span class="vault-stat-label">Recovery Key</span>
+                        <span class="vault-stat-value"><?= $hasRecoveryKey ? "Configured" : "Not Set" ?></span>
+                    </div>
                 </div>
 
                 <?php if (!empty($backupCodes)): ?>
