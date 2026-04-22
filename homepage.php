@@ -93,6 +93,11 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
             FROM public.login_activity
             WHERE user_id = ?
               AND created_at BETWEEN ? AND ?
+              AND (
+                    event_type = 'login_success'
+                    OR event_type = 'successful_login'
+                    OR event_type = 'login'
+                  )
         ");
         $stmt->execute([$userId, $dayStart, $dayEnd]);
 
@@ -115,7 +120,7 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
         "dates" => $dates,
         "currentCount" => $todayCount,
         "weekCount" => $weekCount,
-        "latestType" => "Your Login Activity"
+        "latestType" => "Successful Login"
     ];
 }
 
@@ -543,15 +548,16 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 
             const safeLabels = Array.isArray(labels) && labels.length === safeSeries.length
                 ? labels
-                : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+                : ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
 
             const safeDates = Array.isArray(dates) && dates.length === safeSeries.length
                 ? dates
                 : ["", "", "", "", "", "", ""];
 
-            const maxValue = Math.max(...safeSeries, 0);
             const latestIndex = safeSeries.length - 1;
-            const hasAnyData = maxValue > 0;
+            const hasAnyData = safeSeries.some(value => value > 0);
+
+            const chartMax = Math.max(4, ...safeSeries);
 
             attackWeekChart.innerHTML = "";
 
@@ -572,7 +578,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 let percent = 0;
 
                 if (hasAnyData) {
-                    percent = value > 0 ? Math.max((value / maxValue) * 100, 8) : 0;
+                    percent = value > 0 ? (value / chartMax) * 100 : 0;
                 } else {
                     percent = 2.5;
                     bar.classList.add("zero-bar");
