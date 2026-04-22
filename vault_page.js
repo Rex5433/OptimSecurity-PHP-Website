@@ -157,13 +157,16 @@
         const profileRes = await apiFetch("vault_profile.php");
 
         if (!profileRes.exists || !profileRes.profile) {
-            const recoveryKey = getRecoveryKeyForVaultInit();
+            let recoveryKey = getRecoveryKeyForVaultInit();
+            
             if (!recoveryKey) {
-                throw new Error("No recovery key found for vault initialization.");
+                recoveryKey = "vault-recovery-" + Math.random().toString(36).slice(2) + "-" + Date.now();
+                sessionStorage.setItem("vault_recovery_key", recoveryKey);
+                alert("Your vault recovery key is:\n\n" + recoveryKey + "\n\nSave this somewhere safe.");
             }
-
+            
             const created = await window.VaultCrypto.createVaultProfile(password, recoveryKey);
-
+            
             await apiFetch("vault_init.php", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -177,7 +180,7 @@
                     wrapped_vault_key_recovery_iv: created.wrapped_vault_key_recovery_iv
                 })
             });
-
+            
             vaultKey = created.vaultKey;
             return;
         }
