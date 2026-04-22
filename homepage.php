@@ -76,12 +76,120 @@ function fetchUrl($url)
     return @file_get_contents($url, false, $context);
 }
 
-function buildAttackMetrics(PDO $pdo, int $userId): array
+function normalizeEventType(string $eventType): string
 {
-    $series = [];
+    $value = strtolower(trim($eventType));
+
+    if (
+        str_contains($value, "fail") ||
+        str_contains($value, "invalid") ||
+        str_contains($value, "denied") ||
+        str_contains($value, "blocked") ||
+        str_contains($value, "error")
+    ) {
+        return "failed";
+    }
+
+    if (
+        str_contains($value, "success") ||
+        str_contains($value, "login") ||
+        str_contains($value, "signed in") ||
+        str_contains($value, "authenticated")
+    ) {
+        return "success";
+    }
+
+    return "success";
+}
+
+function formatEventLabel(string $eventType): string
+{
+    return normalizeEventType($eventType) === "failed"
+        ? "Failed Login Attempt"
+        : "Successful Login";
+}
+
+function formatLocationText(array $row): string
+{
+    $parts = [];
+
+    $city = trim((string) ($row["city"] ?? ""));
+    $region = trim((string) ($row["region"] ?? ""));
+    $country = trim((string) ($row["country"] ?? ""));
+    $location = trim((string) ($row["location"] ?? ""));
+
+    if ($city !== "") {
+        $parts[] = $city;
+    }
+    if ($region !== "") {
+        $parts[] = $region;
+    }
+
+    if (!empty($parts)) {
+        return implode(", ", $parts);
+    }
+
+    if ($country !== "") {
+        return $country;
+    }
+
+    if ($location !== "") {
+        return $location;
+    }
+
+    return "Unknown Location";
+}
+
+function parseDeviceLabel(string $userAgent): string
+{
+    $ua = strtolower($userAgent);
+
+    if ($ua === "") {
+        return "Unknown Device";
+    }
+
+    if (str_contains($ua, "edg")) {
+        return "Edge Browser";
+    }
+    if (str_contains($ua, "chrome") && !str_contains($ua, "edg")) {
+        return "Chrome Browser";
+    }
+    if (str_contains($ua, "firefox")) {
+        return "Firefox Browser";
+    }
+    if (str_contains($ua, "safari") && !str_contains($ua, "chrome")) {
+        return "Safari Browser";
+    }
+    if (str_contains($ua, "android")) {
+        return "Android Device";
+    }
+    if (str_contains($ua, "iphone") || str_contains($ua, "ipad") || str_contains($ua, "ios")) {
+        return "Apple Mobile Device";
+    }
+    if (str_contains($ua, "windows")) {
+        return "Windows Device";
+    }
+    if (str_contains($ua, "mac")) {
+        return "Mac Device";
+    }
+    if (str_contains($ua, "linux")) {
+        return "Linux Device";
+    }
+
+    return "Web Browser";
+}
+
+function buildLiveActivity(PDO $pdo, int $userId): array
+{
+    $successSeries = [];
+    $failedSeries = [];
     $labels = [];
     $dates = [];
-    $weekCount = 0;
+
+    $todaySuccess = 0;
+    $todayFailed = 0;
+    $weekSuccess = 0;
+    $weekFailed = 0;
 
     for ($i = 6; $i >= 0; $i--) {
         $dayTs = strtotime("-$i days");
@@ -89,33 +197,79 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
         $dayEnd = date("Y-m-d 23:59:59", $dayTs);
 
         $stmt = $pdo->prepare("
-            SELECT COUNT(*)
+            SELECT event_type
             FROM public.login_activity
             WHERE user_id = ?
               AND created_at BETWEEN ? AND ?
+            ORDER BY created_at ASC
         ");
         $stmt->execute([$userId, $dayStart, $dayEnd]);
 
-        $count = (int) $stmt->fetchColumn();
+        $successCount = 0;
+        $failedCount = 0;
 
-        $series[] = $count;
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $normalized = normalizeEventType((string) ($row["event_type"] ?? ""));
+            if ($normalized === "failed") {
+                $failedCount++;
+            } else {
+                $successCount++;
+            }
+        }
+
+        $successSeries[] = $successCount;
+        $failedSeries[] = $failedCount;
         $labels[] = date("D", strtotime($dayStart));
         $dates[] = date("M j", strtotime($dayStart));
-        $weekCount += $count;
+
+        $weekSuccess += $successCount;
+        $weekFailed += $failedCount;
+
+        if ($i === 0) {
+            $todaySuccess = $successCount;
+            $todayFailed = $failedCount;
+        }
     }
 
-    $todayCount = end($series);
-    if ($todayCount === false) {
-        $todayCount = 0;
+    $totalAttempts = $weekSuccess + $weekFailed;
+    $successRate = $totalAttempts > 0 ? (int) round(($weekSuccess / $totalAttempts) * 100) : 0;
+
+    $recentStmt = $pdo->prepare("
+        SELECT created_at, event_type, ip_address, location, city, region, country, user_agent
+        FROM public.login_activity
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 5
+    ");
+    $recentStmt->execute([$userId]);
+
+    $recentActivity = [];
+    while ($row = $recentStmt->fetch(PDO::FETCH_ASSOC)) {
+        $recentActivity[] = [
+            "status" => normalizeEventType((string) ($row["event_type"] ?? "")),
+            "label" => formatEventLabel((string) ($row["event_type"] ?? "")),
+            "date" => !empty($row["created_at"]) ? date("D M j, g:i A", strtotime((string) $row["created_at"])) : "Unknown Time",
+            "location" => formatLocationText($row),
+            "device" => parseDeviceLabel((string) ($row["user_agent"] ?? "")),
+            "ip" => trim((string) ($row["ip_address"] ?? "")) !== "" ? (string) $row["ip_address"] : "Unknown IP"
+        ];
     }
+
+    $latest = $recentActivity[0] ?? null;
 
     return [
-        "series" => $series,
+        "successSeries" => $successSeries,
+        "failedSeries" => $failedSeries,
         "labels" => $labels,
         "dates" => $dates,
-        "currentCount" => $todayCount,
-        "weekCount" => $weekCount,
-        "latestType" => "Your Login Activity"
+        "todaySuccess" => $todaySuccess,
+        "todayFailed" => $todayFailed,
+        "weekSuccess" => $weekSuccess,
+        "weekFailed" => $weekFailed,
+        "totalAttempts" => $totalAttempts,
+        "successRate" => $successRate,
+        "recentActivity" => $recentActivity,
+        "latestActivity" => $latest
     ];
 }
 
@@ -213,7 +367,7 @@ if (empty($newsItems)) {
     ];
 }
 
-$attackMetrics = buildAttackMetrics($pdo, $userId);
+$liveActivity = buildLiveActivity($pdo, $userId);
 
 $alertCount = count($recentVulns);
 $threatScore = getThreatScore($alertCount);
@@ -223,7 +377,6 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -231,7 +384,6 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="homepage.css">
 </head>
-
 <body class="dashboard-body">
     <div class="dash-shell">
         <aside class="dash-sidebar">
@@ -288,46 +440,106 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 
                     <div class="news-list" id="newsList">
                         <?php foreach ($newsItems as $item): ?>
-                            <a class="news-item live-news news-link-card" href="<?= htmlspecialchars($item["link"]) ?>"
-                                target="_blank" rel="noopener noreferrer">
+                            <a class="news-item live-news news-link-card" href="<?= htmlspecialchars($item["link"]) ?>" target="_blank" rel="noopener noreferrer">
                                 <div class="news-head"><?= safeText($item["title"]) ?></div>
                                 <div class="news-sub"><?= safeText($item["summary"]) ?></div>
-                                <div class="news-meta"><?= safeText($item["meta"]) ?></div>
+                                <div class="news-meta">
+                                    <?= safeText($item["meta"]) ?>
+                                    <?php if (!empty($item["date"])): ?>
+                                        <span class="news-date">• <?= safeText($item["date"]) ?></span>
+                                    <?php endif; ?>
+                                </div>
                             </a>
                         <?php endforeach; ?>
                     </div>
                 </div>
 
-                <div class="dash-card">
-                    <div class="card-header">
-                        <h2>Login Activity</h2>
+                <div class="dash-card live-activity-card">
+                    <div class="live-activity-header">
+                        <div>
+                            <h2>Live Activity</h2>
+                            <p>Your login activity overview</p>
+                        </div>
                     </div>
 
-                    <div class="chart-box live-chart-box weekly-chart-box">
-                        <div class="weekly-chart-topline">
+                    <div class="live-activity-chart-shell">
+                        <div class="live-activity-chart-top">
                             <span>This Week</span>
-                            <span>Your Security Events</span>
+                            <span>Click a bar for details</span>
                         </div>
 
-                        <div class="attack-week-chart" id="attackWeekChart"></div>
-                    </div>
+                        <div class="live-activity-chart" id="liveActivityChart"></div>
 
-                    <div class="attack-live-stats">
-                        <div class="attack-mini-card">
-                            <span class="attack-mini-label">Today</span>
-                            <span class="attack-mini-value"
-                                id="attackCurrentCount"><?= (int) $attackMetrics["currentCount"] ?></span>
-                        </div>
-
-                        <div class="attack-mini-card">
-                            <span class="attack-mini-label">This Week</span>
-                            <span class="attack-mini-value"
-                                id="attackWeekCount"><?= (int) $attackMetrics["weekCount"] ?></span>
+                        <div class="live-activity-legend">
+                            <span class="legend-item">
+                                <span class="legend-dot legend-success"></span>
+                                Successful
+                            </span>
+                            <span class="legend-item">
+                                <span class="legend-dot legend-failed"></span>
+                                Failed
+                            </span>
                         </div>
                     </div>
 
-                    <div class="chart-meta" id="attackTrendMeta">
-                        Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
+                    <div class="live-stat-grid">
+                        <div class="live-stat-box">
+                            <div class="live-stat-title">TODAY</div>
+                            <div class="live-stat-main success-text" id="todaySuccessCount"><?= (int) $liveActivity["todaySuccess"] ?></div>
+                            <div class="live-stat-sub">Successful Logins</div>
+                            <div class="live-stat-divider"></div>
+                            <div class="live-stat-secondary failed-text" id="todayFailedCount"><?= (int) $liveActivity["todayFailed"] ?></div>
+                            <div class="live-stat-sub">Failed Attempts</div>
+                        </div>
+
+                        <div class="live-stat-box">
+                            <div class="live-stat-title">THIS WEEK</div>
+                            <div class="live-stat-main success-text" id="weekSuccessCount"><?= (int) $liveActivity["weekSuccess"] ?></div>
+                            <div class="live-stat-sub">Successful Logins</div>
+                            <div class="live-stat-divider"></div>
+                            <div class="live-stat-secondary failed-text" id="weekFailedCount"><?= (int) $liveActivity["weekFailed"] ?></div>
+                            <div class="live-stat-sub">Failed Attempts</div>
+                        </div>
+
+                        <div class="live-stat-box">
+                            <div class="live-stat-title">SUCCESS RATE</div>
+                            <div class="live-stat-main success-text" id="successRateValue"><?= (int) $liveActivity["successRate"] ?>%</div>
+                            <div class="live-stat-sub">Success over this week</div>
+                        </div>
+
+                        <div class="live-stat-box">
+                            <div class="live-stat-title">TOTAL ATTEMPTS</div>
+                            <div class="live-stat-main neutral-text" id="totalAttemptsValue"><?= (int) $liveActivity["totalAttempts"] ?></div>
+                            <div class="live-stat-sub">This week</div>
+                        </div>
+                    </div>
+
+                    <div class="recent-activity-box">
+                        <div class="recent-activity-top">
+                            <h3>Recent Login Activity</h3>
+                            <button type="button" class="recent-activity-btn">View All Activity</button>
+                        </div>
+
+                        <div class="recent-activity-list" id="recentActivityList">
+                            <?php foreach ($liveActivity["recentActivity"] as $activity): ?>
+                                <div class="recent-activity-row">
+                                    <div class="recent-activity-status <?= $activity["status"] === "failed" ? "status-failed" : "status-success" ?>">
+                                        <?= $activity["status"] === "failed" ? "✕" : "✓" ?>
+                                    </div>
+
+                                    <div class="recent-activity-main">
+                                        <div class="recent-activity-label <?= $activity["status"] === "failed" ? "failed-text" : "" ?>">
+                                            <?= htmlspecialchars($activity["label"]) ?>
+                                        </div>
+                                        <div class="recent-activity-date"><?= htmlspecialchars($activity["date"]) ?></div>
+                                    </div>
+
+                                    <div class="recent-activity-meta"><?= htmlspecialchars($activity["location"]) ?></div>
+                                    <div class="recent-activity-meta"><?= htmlspecialchars($activity["device"]) ?></div>
+                                    <div class="recent-activity-ip"><?= htmlspecialchars($activity["ip"]) ?></div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -387,8 +599,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 
                     <div class="quick-tips-bar">
                         <div class="tips-search-wrapper">
-                            <input type="text" id="tipsSearch" class="tips-search-input"
-                                placeholder="Search tips like MFA, phishing, passwords...">
+                            <input type="text" id="tipsSearch" class="tips-search-input" placeholder="Search tips like MFA, phishing, passwords...">
                         </div>
 
                         <button type="button" class="refresh-btn" id="shuffleTipsBtn">
@@ -399,52 +610,6 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     <div class="tips-list" id="tipsList"></div>
                     <div class="empty-state hidden-warning" id="tipsEmptyState">
                         No tips matched your search.
-                    </div>
-                </div>
-            </section>
-
-            <section class="dash-features">
-                <div class="features-title">Quick Access</div>
-
-                <div class="tertiary-grid">
-                    <div class="tertiary-box">
-                        <h3>Password Tools</h3>
-                        <p>Quick access to password analysis and generator features.</p>
-                        <div class="tertiary-action">
-                            <a class="tertiary-link" href="password_checker.php">Open Tools</a>
-                        </div>
-                    </div>
-
-                    <div class="tertiary-box">
-                        <h3>Password Vault</h3>
-                        <p>Store and manage saved usernames, passwords, and notes from your dashboard.</p>
-                        <div class="tertiary-action">
-                            <a class="tertiary-link" href="vault.php">Open Vault</a>
-                        </div>
-                    </div>
-
-                    <div class="tertiary-box">
-                        <h3>Phishing Checks</h3>
-                        <p>Analyze suspicious content, messages, and URLs.</p>
-                        <div class="tertiary-action">
-                            <a class="tertiary-link" href="phishing_toolkit.php">Run Check</a>
-                        </div>
-                    </div>
-
-                    <div class="tertiary-box">
-                        <h3>Activity</h3>
-                        <p>Track recent dashboard and account events.</p>
-                        <div class="tertiary-action">
-                            <a class="tertiary-link" href="homepage.php">View Activity</a>
-                        </div>
-                    </div>
-
-                    <div class="tertiary-box">
-                        <h3>Threat Intel</h3>
-                        <p>Monitor live vulnerability and advisory updates from official sources.</p>
-                        <div class="tertiary-action">
-                            <a class="tertiary-link" href="homepage.php">View Feed</a>
-                        </div>
                     </div>
                 </div>
             </section>
@@ -459,10 +624,15 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
         const feedWarning = document.getElementById("feedWarning");
         const liveUpdateLabel = document.getElementById("liveUpdateLabel");
         const manualRefreshBtn = document.getElementById("manualRefreshBtn");
-        const attackWeekChart = document.getElementById("attackWeekChart");
-        const attackTrendMeta = document.getElementById("attackTrendMeta");
-        const attackCurrentCount = document.getElementById("attackCurrentCount");
-        const attackWeekCount = document.getElementById("attackWeekCount");
+
+        const liveActivityChart = document.getElementById("liveActivityChart");
+        const todaySuccessCount = document.getElementById("todaySuccessCount");
+        const todayFailedCount = document.getElementById("todayFailedCount");
+        const weekSuccessCount = document.getElementById("weekSuccessCount");
+        const weekFailedCount = document.getElementById("weekFailedCount");
+        const successRateValue = document.getElementById("successRateValue");
+        const totalAttemptsValue = document.getElementById("totalAttemptsValue");
+        const recentActivityList = document.getElementById("recentActivityList");
 
         const tipsList = document.getElementById("tipsList");
         const tipsSearch = document.getElementById("tipsSearch");
@@ -485,14 +655,14 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 a.target = "_blank";
                 a.rel = "noopener noreferrer";
 
-                const metaText = item.date
-                    ? `${escapeHtml(item.meta || "")} • ${escapeHtml(item.date)}`
-                    : `${escapeHtml(item.meta || "")}`;
+                const dateHtml = item.date
+                    ? `<span class="news-date">• ${escapeHtml(item.date)}</span>`
+                    : "";
 
                 a.innerHTML = `
                     <div class="news-head">${escapeHtml(item.title || "Untitled Update")}</div>
                     <div class="news-sub">${escapeHtml(item.summary || "")}</div>
-                    <div class="news-meta">${metaText}</div>
+                    <div class="news-meta">${escapeHtml(item.meta || "")} ${dateHtml}</div>
                 `;
 
                 newsList.appendChild(a);
@@ -529,85 +699,122 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
             });
         }
 
-        function renderAttackWeek(series, labels, dates) {
-            const safeSeries = Array.isArray(series) && series.length > 0
-                ? series.map(value => Number(value) || 0)
+        function renderLiveActivityChart(successSeries, failedSeries, labels, dates) {
+            const safeSuccess = Array.isArray(successSeries) && successSeries.length === 7
+                ? successSeries.map(v => Number(v) || 0)
                 : [0, 0, 0, 0, 0, 0, 0];
 
-            const safeLabels = Array.isArray(labels) && labels.length === safeSeries.length
-                ? labels
-                : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+            const safeFailed = Array.isArray(failedSeries) && failedSeries.length === 7
+                ? failedSeries.map(v => Number(v) || 0)
+                : [0, 0, 0, 0, 0, 0, 0];
 
-            const safeDates = Array.isArray(dates) && dates.length === safeSeries.length
+            const safeLabels = Array.isArray(labels) && labels.length === 7
+                ? labels
+                : ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+
+            const safeDates = Array.isArray(dates) && dates.length === 7
                 ? dates
                 : ["", "", "", "", "", "", ""];
 
-            const maxValue = Math.max(...safeSeries, 0);
-            const latestIndex = safeSeries.length - 1;
-            const hasAnyData = maxValue > 0;
+            const maxValue = Math.max(...safeSuccess, ...safeFailed, 1);
 
-            attackWeekChart.innerHTML = "";
+            liveActivityChart.innerHTML = `
+                <div class="live-chart-grid-lines">
+                    <span>5</span>
+                    <span>4</span>
+                    <span>3</span>
+                    <span>2</span>
+                    <span>1</span>
+                    <span>0</span>
+                </div>
+                <div class="live-chart-columns"></div>
+            `;
 
-            safeSeries.forEach((value, index) => {
+            const columns = liveActivityChart.querySelector(".live-chart-columns");
+
+            safeLabels.forEach((label, index) => {
+                const successValue = safeSuccess[index];
+                const failedValue = safeFailed[index];
+
+                const successHeight = Math.max((successValue / maxValue) * 100, successValue > 0 ? 8 : 0);
+                const failedHeight = Math.max((failedValue / maxValue) * 100, failedValue > 0 ? 8 : 0);
+
                 const col = document.createElement("div");
-                col.className = "attack-week-col";
+                col.className = "live-chart-col";
 
-                if (index === latestIndex) {
-                    col.classList.add("active-day");
-                }
+                col.innerHTML = `
+                    <div class="live-chart-bars">
+                        <div class="live-bar-wrap">
+                            <div class="live-bar-value success-text">${successValue}</div>
+                            <div class="live-bar live-bar-success" style="height:${successHeight}%"></div>
+                        </div>
+                        <div class="live-bar-wrap">
+                            <div class="live-bar-value failed-text">${failedValue}</div>
+                            <div class="live-bar live-bar-failed" style="height:${failedHeight}%"></div>
+                        </div>
+                    </div>
+                    <div class="live-chart-day">${escapeHtml(label)}</div>
+                    <div class="live-chart-date">${escapeHtml(safeDates[index])}</div>
+                `;
 
-                const plot = document.createElement("div");
-                plot.className = "attack-week-plot";
-
-                const bar = document.createElement("div");
-                bar.className = "attack-week-bar";
-
-                let percent = 0;
-
-                if (hasAnyData) {
-                    percent = value > 0 ? Math.max((value / maxValue) * 100, 8) : 0;
-                } else {
-                    percent = 2.5;
-                    bar.classList.add("zero-bar");
-                }
-
-                bar.style.height = `${percent}%`;
-                bar.title = `${safeLabels[index]} ${safeDates[index]}: ${value} login${value === 1 ? "" : "s"}`;
-
-                const day = document.createElement("div");
-                day.className = "attack-week-day";
-                day.textContent = safeLabels[index];
-
-                const date = document.createElement("div");
-                date.className = "attack-week-date";
-                date.textContent = safeDates[index];
-
-                plot.appendChild(bar);
-                col.appendChild(plot);
-                col.appendChild(day);
-                col.appendChild(date);
-
-                attackWeekChart.appendChild(col);
+                columns.appendChild(col);
             });
-
-            if (!hasAnyData) {
-                const empty = document.createElement("div");
-                empty.className = "attack-week-empty";
-                empty.textContent = "No login activity this week";
-                attackWeekChart.appendChild(empty);
-            }
         }
 
-        function updateAttackActivity(series, labels, dates, latestType, currentCount, weekCount) {
-            renderAttackWeek(series, labels, dates);
-            attackCurrentCount.textContent = String(currentCount ?? 0);
-            attackWeekCount.textContent = String(weekCount ?? 0);
-            attackTrendMeta.textContent = `Latest: ${latestType || "No Recent Activity"}`;
+        function renderRecentActivity(items) {
+            recentActivityList.innerHTML = "";
+
+            if (!Array.isArray(items) || items.length === 0) {
+                recentActivityList.innerHTML = `<div class="empty-state">No recent login activity found.</div>`;
+                return;
+            }
+
+            items.forEach(item => {
+                const status = item.status === "failed" ? "failed" : "success";
+                const row = document.createElement("div");
+                row.className = "recent-activity-row";
+
+                row.innerHTML = `
+                    <div class="recent-activity-status ${status === "failed" ? "status-failed" : "status-success"}">
+                        ${status === "failed" ? "✕" : "✓"}
+                    </div>
+                    <div class="recent-activity-main">
+                        <div class="recent-activity-label ${status === "failed" ? "failed-text" : ""}">
+                            ${escapeHtml(item.label || "")}
+                        </div>
+                        <div class="recent-activity-date">${escapeHtml(item.date || "")}</div>
+                    </div>
+                    <div class="recent-activity-meta">${escapeHtml(item.location || "Unknown Location")}</div>
+                    <div class="recent-activity-meta">${escapeHtml(item.device || "Unknown Device")}</div>
+                    <div class="recent-activity-ip">${escapeHtml(item.ip || "Unknown IP")}</div>
+                `;
+
+                recentActivityList.appendChild(row);
+            });
+        }
+
+        function updateLiveActivity(data) {
+            renderLiveActivityChart(
+                data.liveSuccessSeries || [],
+                data.liveFailedSeries || [],
+                data.liveLabels || [],
+                data.liveDates || []
+            );
+
+            todaySuccessCount.textContent = String(data.todaySuccess ?? 0);
+            todayFailedCount.textContent = String(data.todayFailed ?? 0);
+            weekSuccessCount.textContent = String(data.weekSuccess ?? 0);
+            weekFailedCount.textContent = String(data.weekFailed ?? 0);
+            successRateValue.textContent = `${data.successRate ?? 0}%`;
+            totalAttemptsValue.textContent = String(data.totalAttempts ?? 0);
+
+            renderRecentActivity(data.recentActivity || []);
         }
 
         function updateDashboard(data) {
             renderNews(data.newsItems || []);
             renderVulns(data.recentVulns || []);
+            updateLiveActivity(data);
 
             const online = data.feedOnline || data.advisoryOnline;
             feedStatusText.textContent = online ? "Live Feed Online" : "Feed Offline";
@@ -620,15 +827,6 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 feedWarning.textContent = "";
                 feedWarning.classList.add("hidden-warning");
             }
-
-            updateAttackActivity(
-                data.attackSeries || [],
-                data.attackLabels || [],
-                data.attackDates || [],
-                data.attackLatestType || "No Recent Activity",
-                data.attackCurrentCount || 0,
-                data.attackWeekCount || 0
-            );
         }
 
         let currentTool = "home";
@@ -769,14 +967,19 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
             fetchDashboardData(true);
         });
 
-        updateAttackActivity(
-            <?= json_encode($attackMetrics["series"]) ?>,
-            <?= json_encode($attackMetrics["labels"]) ?>,
-            <?= json_encode($attackMetrics["dates"]) ?>,
-            <?= json_encode($attackMetrics["latestType"]) ?>,
-            <?= (int) $attackMetrics["currentCount"] ?>,
-            <?= (int) $attackMetrics["weekCount"] ?>
-        );
+        updateLiveActivity({
+            liveSuccessSeries: <?= json_encode($liveActivity["successSeries"]) ?>,
+            liveFailedSeries: <?= json_encode($liveActivity["failedSeries"]) ?>,
+            liveLabels: <?= json_encode($liveActivity["labels"]) ?>,
+            liveDates: <?= json_encode($liveActivity["dates"]) ?>,
+            todaySuccess: <?= (int) $liveActivity["todaySuccess"] ?>,
+            todayFailed: <?= (int) $liveActivity["todayFailed"] ?>,
+            weekSuccess: <?= (int) $liveActivity["weekSuccess"] ?>,
+            weekFailed: <?= (int) $liveActivity["weekFailed"] ?>,
+            successRate: <?= (int) $liveActivity["successRate"] ?>,
+            totalAttempts: <?= (int) $liveActivity["totalAttempts"] ?>,
+            recentActivity: <?= json_encode($liveActivity["recentActivity"]) ?>
+        });
 
         detectCurrentTool();
         loadDefaultTips();
@@ -787,5 +990,4 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
         }, 60000);
     </script>
 </body>
-
 </html>
