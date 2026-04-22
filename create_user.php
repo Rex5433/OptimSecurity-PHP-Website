@@ -1,5 +1,6 @@
 <?php
 include "db.php";
+require_once __DIR__ . "/recovery_helpers.php";
 
 $message = "";
 $success = "";
@@ -8,6 +9,7 @@ $name = "";
 $username = "";
 $email = "";
 $show_passwords = false;
+$generatedRecoveryKey = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
@@ -25,26 +27,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         empty($password_input) ||
         empty($confirm_password)
     ) {
-
         $message = "Please fill in all fields.";
-
     } elseif (strlen($password_input) < 8) {
-
         $message = "Password must be at least 8 characters long.";
-
     } elseif (
         !preg_match('/[A-Z]/', $password_input) ||
         !preg_match('/[a-z]/', $password_input) ||
         !preg_match('/[0-9]/', $password_input) ||
         !preg_match('/[\W_]/', $password_input)
     ) {
-
         $message = "Password must contain an uppercase letter, lowercase letter, number, and special character.";
-
     } elseif ($password_input !== $confirm_password) {
-
         $message = "Passwords do not match.";
-
     } elseif ($pdo) {
 
         $check_stmt = $pdo->prepare('
@@ -60,33 +54,44 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         ]);
 
         if ($check_stmt->fetch()) {
-
             $message = "Username or email already exists.";
-
         } else {
+            try {
+                $hashed_password = password_hash($password_input, PASSWORD_DEFAULT);
 
-            $hashed_password = password_hash($password_input, PASSWORD_DEFAULT);
+                $insert_stmt = $pdo->prepare('
+                    INSERT INTO "Accounts" (name, username, email, password)
+                    VALUES (:name, :username, :email, :password)
+                    RETURNING id
+                ');
 
-            $insert_stmt = $pdo->prepare('
-                INSERT INTO "Accounts" (name, username, email, password)
-                VALUES (:name, :username, :email, :password)
-            ');
+                $insert_stmt->execute([
+                    "name" => $name,
+                    "username" => $username,
+                    "email" => $email,
+                    "password" => $hashed_password
+                ]);
 
-            $insert_stmt->execute([
-                "name" => $name,
-                "username" => $username,
-                "email" => $email,
-                "password" => $hashed_password
-            ]);
+                $newUserId = $insert_stmt->fetchColumn();
 
-            header("Location: login.php?created=1");
-            exit;
+                if (!$newUserId) {
+                    $message = "Account created, but recovery key setup failed.";
+                } else {
+                    $generatedRecoveryKey = generateRecoveryKey();
+
+                    if (!upsertRecoveryKey($pdo, (int) $newUserId, $generatedRecoveryKey)) {
+                        $message = "Account created, but recovery key setup failed.";
+                    } else {
+                        $success = "Account created successfully. Save your recovery key now.";
+                    }
+                }
+            } catch (Throwable $e) {
+                $message = "Could not create account right now.";
+            }
         }
 
     } else {
-
         $message = "Database connection failed.";
-
     }
 }
 ?>
@@ -102,6 +107,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="manifest" href="/site.webmanifest">
+
+    <style>
+        .recovery-key-box {
+            margin-top: 16px;
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(39, 233, 181, 0.28);
+            background: rgba(39, 233, 181, 0.08);
+            color: #d9fff4;
+            text-align: center;
+            font-weight: 800;
+            letter-spacing: 1px;
+            word-break: break-word;
+        }
+
+        .recovery-note {
+            margin-top: 12px;
+            color: #b9d2dd;
+            text-align: center;
+            line-height: 1.5;
+        }
+    </style>
 </head>
 <body>
     <div class="login-wrapper">
@@ -116,63 +143,79 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 <div class="login-success"><?= htmlspecialchars($success) ?></div>
             <?php endif; ?>
 
-            <form method="post">
-                <div class="form-group">
-                    <label>Name</label>
-                    <input type="text" name="name" required value="<?= htmlspecialchars($name) ?>">
+            <?php if ($generatedRecoveryKey !== ""): ?>
+                <div class="recovery-key-box">
+                    <?= htmlspecialchars($generatedRecoveryKey) ?>
                 </div>
 
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" name="username" required value="<?= htmlspecialchars($username) ?>">
+                <div class="recovery-note">
+                    Save this recovery key somewhere secure. It will only be shown once.
                 </div>
 
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" name="email" required value="<?= htmlspecialchars($email) ?>">
-                </div>
+                <div class="divider"></div>
 
-                <div class="form-group">
-                    <label>Password</label>
-                    <input
-                        type="<?= $show_passwords ? 'text' : 'password' ?>"
-                        name="password"
-                        id="password"
-                        required
-                    >
-                </div>
+                <p class="bottom-link">
+                    <a href="login.php">Continue to Login</a>
+                </p>
+            <?php else: ?>
+                <form method="post">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" name="name" required value="<?= htmlspecialchars($name) ?>">
+                    </div>
 
-                <div class="form-group">
-                    <label>Confirm Password</label>
-                    <input
-                        type="<?= $show_passwords ? 'text' : 'password' ?>"
-                        name="confirm_password"
-                        id="confirm_password"
-                        required
-                    >
-                </div>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" name="username" required value="<?= htmlspecialchars($username) ?>">
+                    </div>
 
-                <div class="options-row create-account-options">
-                    <label class="checkbox-container">
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" name="email" required value="<?= htmlspecialchars($email) ?>">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Password</label>
                         <input
-                            type="checkbox"
-                            name="show_passwords"
-                            id="show_passwords"
-                            onclick="togglePasswords()"
-                            <?= $show_passwords ? 'checked' : '' ?>
+                            type="<?= $show_passwords ? 'text' : 'password' ?>"
+                            name="password"
+                            id="password"
+                            required
                         >
-                        <span>Show Passwords</span>
-                    </label>
-                </div>
+                    </div>
 
-                <button type="submit" class="login-submit">Create Account</button>
-            </form>
+                    <div class="form-group">
+                        <label>Confirm Password</label>
+                        <input
+                            type="<?= $show_passwords ? 'text' : 'password' ?>"
+                            name="confirm_password"
+                            id="confirm_password"
+                            required
+                        >
+                    </div>
 
-            <div class="divider"></div>
+                    <div class="options-row create-account-options">
+                        <label class="checkbox-container">
+                            <input
+                                type="checkbox"
+                                name="show_passwords"
+                                id="show_passwords"
+                                onclick="togglePasswords()"
+                                <?= $show_passwords ? 'checked' : '' ?>
+                            >
+                            <span>Show Passwords</span>
+                        </label>
+                    </div>
 
-            <p class="bottom-link">
-                <a href="login.php">Back to Login</a>
-            </p>
+                    <button type="submit" class="login-submit">Create Account</button>
+                </form>
+
+                <div class="divider"></div>
+
+                <p class="bottom-link">
+                    <a href="login.php">Back to Login</a>
+                </p>
+            <?php endif; ?>
         </div>
     </div>
 
