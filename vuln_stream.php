@@ -1,24 +1,15 @@
 <?php
 session_start();
+require_once __DIR__ . "/attack_helpers.php";
 
 header("Content-Type: application/json");
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 header("Expires: 0");
 
-if (!isset($_SESSION["user_id"])) {
-    http_response_code(401);
-    echo json_encode(["error" => "Unauthorized"]);
-    exit;
-}
-
-require_once __DIR__ . "/attack_helpers.php";
-require_once __DIR__ . "/db.php";
-
-$userId = (int) ($_SESSION["user_id"] ?? 0);
-
 $kevUrl = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 $advisoriesUrl = "https://www.cisa.gov/news-events/cybersecurity-advisories";
+$attackEventsFile = __DIR__ . "/attack_events.json";
 
 function getThreatScore($count)
 {
@@ -62,6 +53,70 @@ function fetchUrl($url)
     ]);
 
     return @file_get_contents($url, false, $context);
+}
+
+function readAttackEvents(string $file): array
+{
+    if (!file_exists($file)) {
+        file_put_contents($file, "[]");
+    }
+
+    $json = file_get_contents($file);
+    $events = json_decode($json, true);
+
+    return is_array($events) ? $events : [];
+}
+
+function buildAttackMetrics(string $file): array
+{
+    $events = readAttackEvents($file);
+    $series = [];
+    $labels = [];
+    $dates = [];
+    $weekCount = 0;
+
+    for ($i = 6; $i >= 0; $i--) {
+        $dayTs = strtotime("-$i days");
+        $dayStart = strtotime(date("Y-m-d 00:00:00", $dayTs));
+        $dayEnd = strtotime(date("Y-m-d 23:59:59", $dayTs));
+
+        $count = 0;
+
+        foreach ($events as $event) {
+            $timestamp = strtotime($event["timestamp"] ?? "");
+            if (!$timestamp) {
+                continue;
+            }
+
+            if ($timestamp >= $dayStart && $timestamp <= $dayEnd) {
+                $count++;
+            }
+        }
+
+        $series[] = $count;
+        $labels[] = date("D", $dayStart);
+        $dates[] = date("M j", $dayStart);
+        $weekCount += $count;
+    }
+
+    usort($events, function ($a, $b) {
+        return strtotime($b["timestamp"] ?? "") <=> strtotime($a["timestamp"] ?? "");
+    });
+
+    $latest = $events[0] ?? null;
+    $todayCount = end($series);
+    if ($todayCount === false) {
+        $todayCount = 0;
+    }
+
+    return [
+        "series" => $series,
+        "labels" => $labels,
+        "dates" => $dates,
+        "currentCount" => $todayCount,
+        "weekCount" => $weekCount,
+        "latestType" => $latest ? formatAttackType((string) ($latest["type"] ?? "")) : "No Recent Activity"
+    ];
 }
 
 function normalizeWhitespace(string $text): string
@@ -132,200 +187,6 @@ function extractPublishedDateFromHtml(string $html): string
     }
 
     return "";
-}
-
-function normalizeEventType(string $eventType): string
-{
-    $value = strtolower(trim($eventType));
-
-    if (
-        str_contains($value, "fail") ||
-        str_contains($value, "invalid") ||
-        str_contains($value, "denied") ||
-        str_contains($value, "blocked") ||
-        str_contains($value, "error")
-    ) {
-        return "failed";
-    }
-
-    if (
-        str_contains($value, "success") ||
-        str_contains($value, "login") ||
-        str_contains($value, "signed in") ||
-        str_contains($value, "authenticated")
-    ) {
-        return "success";
-    }
-
-    return "success";
-}
-
-function formatEventLabel(string $eventType): string
-{
-    return normalizeEventType($eventType) === "failed"
-        ? "Failed Login Attempt"
-        : "Successful Login";
-}
-
-function formatLocationText(array $row): string
-{
-    $parts = [];
-
-    $city = trim((string) ($row["city"] ?? ""));
-    $region = trim((string) ($row["region"] ?? ""));
-    $country = trim((string) ($row["country"] ?? ""));
-    $location = trim((string) ($row["location"] ?? ""));
-
-    if ($city !== "") {
-        $parts[] = $city;
-    }
-    if ($region !== "") {
-        $parts[] = $region;
-    }
-
-    if (!empty($parts)) {
-        return implode(", ", $parts);
-    }
-
-    if ($country !== "") {
-        return $country;
-    }
-
-    if ($location !== "") {
-        return $location;
-    }
-
-    return "Unknown Location";
-}
-
-function parseDeviceLabel(string $userAgent): string
-{
-    $ua = strtolower($userAgent);
-
-    if ($ua === "") {
-        return "Unknown Device";
-    }
-
-    if (str_contains($ua, "edg")) {
-        return "Edge Browser";
-    }
-    if (str_contains($ua, "chrome") && !str_contains($ua, "edg")) {
-        return "Chrome Browser";
-    }
-    if (str_contains($ua, "firefox")) {
-        return "Firefox Browser";
-    }
-    if (str_contains($ua, "safari") && !str_contains($ua, "chrome")) {
-        return "Safari Browser";
-    }
-    if (str_contains($ua, "android")) {
-        return "Android Device";
-    }
-    if (str_contains($ua, "iphone") || str_contains($ua, "ipad") || str_contains($ua, "ios")) {
-        return "Apple Mobile Device";
-    }
-    if (str_contains($ua, "windows")) {
-        return "Windows Device";
-    }
-    if (str_contains($ua, "mac")) {
-        return "Mac Device";
-    }
-    if (str_contains($ua, "linux")) {
-        return "Linux Device";
-    }
-
-    return "Web Browser";
-}
-
-function buildLiveActivity(PDO $pdo, int $userId): array
-{
-    $successSeries = [];
-    $failedSeries = [];
-    $labels = [];
-    $dates = [];
-
-    $todaySuccess = 0;
-    $todayFailed = 0;
-    $weekSuccess = 0;
-    $weekFailed = 0;
-
-    for ($i = 6; $i >= 0; $i--) {
-        $dayTs = strtotime("-$i days");
-        $dayStart = date("Y-m-d 00:00:00", $dayTs);
-        $dayEnd = date("Y-m-d 23:59:59", $dayTs);
-
-        $stmt = $pdo->prepare("
-            SELECT event_type
-            FROM public.login_activity
-            WHERE user_id = ?
-              AND created_at BETWEEN ? AND ?
-            ORDER BY created_at ASC
-        ");
-        $stmt->execute([$userId, $dayStart, $dayEnd]);
-
-        $successCount = 0;
-        $failedCount = 0;
-
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $normalized = normalizeEventType((string) ($row["event_type"] ?? ""));
-            if ($normalized === "failed") {
-                $failedCount++;
-            } else {
-                $successCount++;
-            }
-        }
-
-        $successSeries[] = $successCount;
-        $failedSeries[] = $failedCount;
-        $labels[] = date("D", strtotime($dayStart));
-        $dates[] = date("M j", strtotime($dayStart));
-
-        $weekSuccess += $successCount;
-        $weekFailed += $failedCount;
-
-        if ($i === 0) {
-            $todaySuccess = $successCount;
-            $todayFailed = $failedCount;
-        }
-    }
-
-    $totalAttempts = $weekSuccess + $weekFailed;
-    $successRate = $totalAttempts > 0 ? (int) round(($weekSuccess / $totalAttempts) * 100) : 0;
-
-    $recentStmt = $pdo->prepare("
-        SELECT created_at, event_type, ip_address, location, city, region, country, user_agent
-        FROM public.login_activity
-        WHERE user_id = ?
-        ORDER BY created_at DESC
-        LIMIT 5
-    ");
-    $recentStmt->execute([$userId]);
-
-    $recentActivity = [];
-    while ($row = $recentStmt->fetch(PDO::FETCH_ASSOC)) {
-        $recentActivity[] = [
-            "status" => normalizeEventType((string) ($row["event_type"] ?? "")),
-            "label" => formatEventLabel((string) ($row["event_type"] ?? "")),
-            "date" => !empty($row["created_at"]) ? date("D M j, g:i A", strtotime((string) $row["created_at"])) : "Unknown Time",
-            "location" => formatLocationText($row),
-            "device" => parseDeviceLabel((string) ($row["user_agent"] ?? "")),
-            "ip" => trim((string) ($row["ip_address"] ?? "")) !== "" ? (string) $row["ip_address"] : "Unknown IP"
-        ];
-    }
-
-    return [
-        "successSeries" => $successSeries,
-        "failedSeries" => $failedSeries,
-        "labels" => $labels,
-        "dates" => $dates,
-        "todaySuccess" => $todaySuccess,
-        "todayFailed" => $todayFailed,
-        "weekSuccess" => $weekSuccess,
-        "weekFailed" => $weekFailed,
-        "totalAttempts" => $totalAttempts,
-        "successRate" => $successRate,
-        "recentActivity" => $recentActivity
-    ];
 }
 
 $recentVulns = [];
@@ -451,7 +312,7 @@ if (empty($newsItems)) {
     ];
 }
 
-$liveActivity = buildLiveActivity($pdo, $userId);
+$attackMetrics = buildAttackMetrics($attackEventsFile);
 
 echo json_encode([
     "newsItems" => $newsItems,
@@ -461,16 +322,10 @@ echo json_encode([
     "feedOnline" => $feedOnline,
     "advisoryOnline" => $advisoryOnline,
     "feedError" => trim($feedError),
-
-    "liveSuccessSeries" => $liveActivity["successSeries"],
-    "liveFailedSeries" => $liveActivity["failedSeries"],
-    "liveLabels" => $liveActivity["labels"],
-    "liveDates" => $liveActivity["dates"],
-    "todaySuccess" => $liveActivity["todaySuccess"],
-    "todayFailed" => $liveActivity["todayFailed"],
-    "weekSuccess" => $liveActivity["weekSuccess"],
-    "weekFailed" => $liveActivity["weekFailed"],
-    "totalAttempts" => $liveActivity["totalAttempts"],
-    "successRate" => $liveActivity["successRate"],
-    "recentActivity" => $liveActivity["recentActivity"]
+    "attackSeries" => $attackMetrics["series"],
+    "attackLabels" => $attackMetrics["labels"],
+    "attackDates" => $attackMetrics["dates"],
+    "attackLatestType" => $attackMetrics["latestType"],
+    "attackCurrentCount" => $attackMetrics["currentCount"],
+    "attackWeekCount" => $attackMetrics["weekCount"]
 ]);
