@@ -147,19 +147,34 @@ function fetchIpLocationData(string $ip): array
 
 function insertLoginActivity(PDO $pdo, ?int $userId, string $eventType): void
 {
-    try {
-        $ipAddress = getClientIpAddress();
-        $userAgent = getUserAgentString();
-        $locationData = fetchIpLocationData($ipAddress);
+    $ipAddress = getClientIpAddress();
+    $userAgent = getUserAgentString();
+    $locationData = fetchIpLocationData($ipAddress);
 
-        $stmt = $pdo->prepare("
-            INSERT INTO public.login_activity
-            (user_id, created_at, event_type, ip_address, location, city, region, country, user_agent)
-            VALUES
-            (:user_id, NOW(), :event_type, :ip_address, :location, :city, :region, :country, :user_agent)
-        ");
+    $stmt = $pdo->prepare("
+        INSERT INTO public.login_activity
+        (user_id, created_at, event_type, ip_address, location, city, region, country, user_agent)
+        VALUES
+        (:user_id, NOW(), :event_type, :ip_address, :location, :city, :region, :country, :user_agent)
+    ");
 
-        $stmt->execute([
+    $ok = $stmt->execute([
+        "user_id" => $userId,
+        "event_type" => $eventType,
+        "ip_address" => $ipAddress,
+        "location" => $locationData["location"],
+        "city" => $locationData["city"],
+        "region" => $locationData["region"],
+        "country" => $locationData["country"],
+        "user_agent" => $userAgent
+    ]);
+
+    if (!$ok) {
+        echo "<pre style='color:white;background:#111;padding:16px;border:1px solid #555;'>";
+        echo "login_activity INSERT FAILED\n\n";
+        print_r($stmt->errorInfo());
+        echo "\n\nPayload:\n";
+        print_r([
             "user_id" => $userId,
             "event_type" => $eventType,
             "ip_address" => $ipAddress,
@@ -169,8 +184,8 @@ function insertLoginActivity(PDO $pdo, ?int $userId, string $eventType): void
             "country" => $locationData["country"],
             "user_agent" => $userAgent
         ]);
-    } catch (Throwable $e) {
-        error_log("verify_2fa login_activity insert failed: " . $e->getMessage());
+        echo "</pre>";
+        exit;
     }
 }
 
