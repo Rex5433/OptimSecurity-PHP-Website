@@ -11,6 +11,7 @@ if (!isset($_SESSION["user_id"])) {
     exit;
 }
 
+require_once __DIR__ . "/attack_helpers.php";
 require_once __DIR__ . "/db.php";
 
 $name = $_SESSION["user_name"] ?? "User";
@@ -24,25 +25,33 @@ $feedError = "";
 $feedOnline = false;
 $advisoryOnline = false;
 
-$selectedDay = trim((string)($_GET["activity_day"] ?? ""));
-$tipQuery = trim((string)($_GET["tips_q"] ?? ""));
-$shuffleTips = isset($_GET["shuffle_tips"]);
+$tipsSearchQuery = trim((string) ($_GET["tips"] ?? ""));
+$shuffleTips = isset($_GET["shuffle"]);
+$lastLoadedText = date("M j, Y g:i A");
 
 function safeText($value, $default = "N/A")
 {
-    $value = trim((string)($value ?? ""));
+    $value = trim((string) ($value ?? ""));
     return $value !== "" ? htmlspecialchars($value) : $default;
 }
 
-function rawText($value, $default = "N/A")
+function getThreatScore($count)
 {
-    $value = trim((string)($value ?? ""));
-    return $value !== "" ? $value : $default;
+    if ($count >= 8) {
+        return "Critical";
+    }
+    if ($count >= 5) {
+        return "High";
+    }
+    if ($count >= 3) {
+        return "Elevated";
+    }
+    return "Low";
 }
 
 function getActionLabel($requiredAction)
 {
-    $action = strtolower((string)$requiredAction);
+    $action = strtolower((string) $requiredAction);
 
     if (str_contains($action, "patch") || str_contains($action, "update")) {
         return "Patch Available";
@@ -70,137 +79,30 @@ function fetchUrl($url)
     return @file_get_contents($url, false, $context);
 }
 
-function getLoginActivityColumns(PDO $pdo): array
-{
-    static $cached = null;
-
-    if ($cached !== null) {
-        return $cached;
-    }
-
-    $stmt = $pdo->prepare("
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'login_activity'
-    ");
-    $stmt->execute();
-
-    $cached = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
-    return $cached;
-}
-
-function firstExistingColumn(array $columns, array $candidates): ?string
-{
-    foreach ($candidates as $candidate) {
-        if (in_array($candidate, $columns, true)) {
-            return $candidate;
-        }
-    }
-    return null;
-}
-
-function quoteIdent(string $identifier): string
-{
-    return '"' . str_replace('"', '""', $identifier) . '"';
-}
-
-function getLoginActivityColumnMap(PDO $pdo): array
-{
-    $columns = getLoginActivityColumns($pdo);
-
-    return [
-        "timestamp"  => firstExistingColumn($columns, ["created_at", "login_at", "event_time", "occurred_at", "timestamp"]),
-        "ip"         => firstExistingColumn($columns, ["ip_address", "ip_addr", "ip"]),
-        "location"   => firstExistingColumn($columns, ["location", "geo_location"]),
-        "city"       => firstExistingColumn($columns, ["city"]),
-        "region"     => firstExistingColumn($columns, ["region", "state", "province"]),
-        "country"    => firstExistingColumn($columns, ["country"]),
-        "event_type" => firstExistingColumn($columns, ["event_type", "type", "activity_type"]),
-        "user_agent" => firstExistingColumn($columns, ["user_agent", "device_info", "device"]),
-        "user_id"    => firstExistingColumn($columns, ["user_id", "account_id"]),
-    ];
-}
-
-function buildLocationString(array $row): string
-{
-    $location = trim((string)($row["location"] ?? ""));
-    if ($location !== "") {
-        return $location;
-    }
-
-    $parts = [];
-    foreach (["city", "region", "country"] as $key) {
-        $value = trim((string)($row[$key] ?? ""));
-        if ($value !== "") {
-            $parts[] = $value;
-        }
-    }
-
-    return !empty($parts) ? implode(", ", $parts) : "Unknown";
-}
-
 function buildAttackMetrics(PDO $pdo): array
 {
-    $map = getLoginActivityColumnMap($pdo);
-    $timeCol = $map["timestamp"];
-
     $series = [];
     $labels = [];
     $dates = [];
-    $isoDates = [];
     $weekCount = 0;
-
-    if ($timeCol === null) {
-        for ($i = 6; $i >= 0; $i--) {
-            $dayTs = strtotime("-$i days");
-            $series[] = 0;
-            $labels[] = date("D", $dayTs);
-            $dates[] = date("M j", $dayTs);
-            $isoDates[] = date("Y-m-d", $dayTs);
-        }
-
-        return [
-            "series" => $series,
-            "labels" => $labels,
-            "dates" => $dates,
-            "isoDates" => $isoDates,
-            "currentCount" => 0,
-            "weekCount" => 0,
-            "latestType" => "No Activity Column Found"
-        ];
-    }
-
-    $sql = "
-        SELECT COUNT(*)
-        FROM public.login_activity
-        WHERE " . quoteIdent($timeCol) . " >= ?
-          AND " . quoteIdent($timeCol) . " < ?
-    ";
-
-    if ($map["user_id"] !== null && isset($_SESSION["user_id"])) {
-        $sql .= " AND " . quoteIdent($map["user_id"]) . " = ?";
-    }
-
-    $stmt = $pdo->prepare($sql);
 
     for ($i = 6; $i >= 0; $i--) {
         $dayTs = strtotime("-$i days");
         $dayStart = date("Y-m-d 00:00:00", $dayTs);
-        $dayEnd = date("Y-m-d 00:00:00", strtotime("+1 day", strtotime($dayStart)));
+        $dayEnd = date("Y-m-d 23:59:59", $dayTs);
 
-        $params = [$dayStart, $dayEnd];
-        if ($map["user_id"] !== null && isset($_SESSION["user_id"])) {
-            $params[] = $_SESSION["user_id"];
-        }
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM public.login_activity
+            WHERE created_at BETWEEN ? AND ?
+        ");
+        $stmt->execute([$dayStart, $dayEnd]);
 
-        $stmt->execute($params);
-        $count = (int)$stmt->fetchColumn();
+        $count = (int) $stmt->fetchColumn();
 
         $series[] = $count;
-        $labels[] = date("D", $dayTs);
-        $dates[] = date("M j", $dayTs);
-        $isoDates[] = date("Y-m-d", $dayTs);
+        $labels[] = date("D", strtotime($dayStart));
+        $dates[] = date("M j", strtotime($dayStart));
         $weekCount += $count;
     }
 
@@ -213,95 +115,108 @@ function buildAttackMetrics(PDO $pdo): array
         "series" => $series,
         "labels" => $labels,
         "dates" => $dates,
-        "isoDates" => $isoDates,
-        "currentCount" => (int)$todayCount,
+        "currentCount" => $todayCount,
         "weekCount" => $weekCount,
-        "latestType" => "Successful Login"
+        "latestType" => "Activity Recorded"
     ];
 }
 
-function getActivityDayDetails(PDO $pdo, string $day): ?array
+function renderAttackWeekChart(array $series, array $labels, array $dates): string
 {
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $day)) {
-        return null;
+    if (empty($series)) {
+        $series = [0, 0, 0, 0, 0, 0, 0];
     }
 
-    $map = getLoginActivityColumnMap($pdo);
-    $timeCol = $map["timestamp"];
-
-    if ($timeCol === null) {
-        return [
-            "label" => date("D M j", strtotime($day)),
-            "rows" => []
-        ];
+    if (empty($labels) || count($labels) !== count($series)) {
+        $labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     }
 
-    $selectParts = [];
-
-    if ($map["timestamp"] !== null) {
-        $selectParts[] = quoteIdent($map["timestamp"]) . ' AS "created_at"';
-    }
-    if ($map["ip"] !== null) {
-        $selectParts[] = quoteIdent($map["ip"]) . ' AS "ip"';
-    }
-    if ($map["event_type"] !== null) {
-        $selectParts[] = quoteIdent($map["event_type"]) . ' AS "event_type"';
-    }
-    if ($map["user_agent"] !== null) {
-        $selectParts[] = quoteIdent($map["user_agent"]) . ' AS "user_agent"';
-    }
-    if ($map["location"] !== null) {
-        $selectParts[] = quoteIdent($map["location"]) . ' AS "location"';
-    }
-    if ($map["city"] !== null) {
-        $selectParts[] = quoteIdent($map["city"]) . ' AS "city"';
-    }
-    if ($map["region"] !== null) {
-        $selectParts[] = quoteIdent($map["region"]) . ' AS "region"';
-    }
-    if ($map["country"] !== null) {
-        $selectParts[] = quoteIdent($map["country"]) . ' AS "country"';
+    if (empty($dates) || count($dates) !== count($series)) {
+        $dates = array_fill(0, count($series), "");
     }
 
-    if (empty($selectParts)) {
-        return [
-            "label" => date("D M j", strtotime($day)),
-            "rows" => []
-        ];
-    }
+    $maxValue = max($series);
+    $hasAnyData = $maxValue > 0;
+    $latestIndex = count($series) - 1;
 
-    $sql = "
-        SELECT " . implode(", ", $selectParts) . "
-        FROM public.login_activity
-        WHERE " . quoteIdent($timeCol) . " >= ?
-          AND " . quoteIdent($timeCol) . " < ?
-    ";
+    ob_start();
+    ?>
+    <div class="attack-week-chart">
+        <?php foreach ($series as $index => $value): ?>
+            <?php
+            $value = (int) $value;
+            $percent = 0;
+            $barClass = "attack-week-bar";
 
-    $params = [
-        $day . " 00:00:00",
-        date("Y-m-d 00:00:00", strtotime($day . " +1 day"))
-    ];
+            if ($hasAnyData) {
+                $percent = $value > 0 ? max(($value / $maxValue) * 100, 8) : 0;
+            } else {
+                $percent = 2.5;
+                $barClass .= " zero-bar";
+            }
 
-    if ($map["user_id"] !== null && isset($_SESSION["user_id"])) {
-        $sql .= " AND " . quoteIdent($map["user_id"]) . " = ?";
-        $params[] = $_SESSION["user_id"];
-    }
+            $colClass = "attack-week-col";
+            if ($index === $latestIndex) {
+                $colClass .= " active-day";
+            }
+            ?>
+            <div class="<?= $colClass ?>">
+                <div class="attack-week-plot">
+                    <div
+                        class="<?= $barClass ?>"
+                        style="height: <?= htmlspecialchars((string) $percent) ?>%;"
+                        title="<?= htmlspecialchars($labels[$index] . ' ' . $dates[$index] . ': ' . $value . ' event' . ($value === 1 ? '' : 's')) ?>">
+                    </div>
+                </div>
+                <div class="attack-week-day"><?= htmlspecialchars($labels[$index]) ?></div>
+                <div class="attack-week-date"><?= htmlspecialchars($dates[$index]) ?></div>
+            </div>
+        <?php endforeach; ?>
 
-    $sql .= " ORDER BY " . quoteIdent($timeCol) . " DESC LIMIT 10";
+        <?php if (!$hasAnyData): ?>
+            <div class="attack-week-empty">No activity this week</div>
+        <?php endif; ?>
+    </div>
+    <?php
+    return ob_get_clean();
+}
 
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-    foreach ($rows as &$row) {
-        $row["location_display"] = buildLocationString($row);
-    }
-    unset($row);
-
+function getTipLibrary(): array
+{
     return [
-        "label" => date("D M j", strtotime($day)),
-        "rows" => $rows
+        "home" => [
+            "Enable MFA on all primary accounts.",
+            "Prioritize known exploited vulnerabilities first.",
+            "Review CISA alerts regularly for active threat guidance.",
+            "Use long, unique passwords for important services.",
+            "Keep browsers and operating systems fully updated.",
+            "Back up important files regularly.",
+            "Limit admin privileges wherever possible.",
+            "Watch for suspicious links and attachments."
+        ]
     ];
+}
+
+function getTipsForDisplay(string $query = "", bool $shuffle = false): array
+{
+    $tips = getTipLibrary()["home"];
+
+    if ($shuffle) {
+        shuffle($tips);
+    }
+
+    if ($query !== "") {
+        $queryLower = strtolower($query);
+        $tips = array_values(array_filter($tips, function ($tip) use ($queryLower) {
+            return str_contains(strtolower($tip), $queryLower);
+        }));
+    }
+
+    if ($query === "") {
+        return array_slice($tips, 0, 3);
+    }
+
+    return $tips;
 }
 
 $rawKev = fetchUrl($kevUrl);
@@ -364,7 +279,7 @@ if ($rawAdvisories !== false) {
             ];
         }
 
-        if (count($newsItems) >= 4) {
+        if (count($newsItems) >= 3) {
             break;
         }
     }
@@ -374,54 +289,44 @@ if ($rawAdvisories !== false) {
     $feedError .= "Unable to load CISA advisories page. ";
 }
 
+if (empty($recentVulns)) {
+    $recentVulns = [
+        [
+            "vendorProject" => "Feed Status",
+            "product" => "Unavailable",
+            "shortDescription" => "Live vulnerability data could not be loaded.",
+            "requiredAction" => "Retry later",
+            "dateAdded" => date("Y-m-d")
+        ]
+    ];
+}
+
 if (empty($newsItems)) {
     $newsItems = [
         [
             "title" => "Live security updates unavailable",
             "summary" => "Could not load titled security updates right now.",
-            "meta" => "Source: CISA",
-            "date" => date("M j, Y"),
+            "meta" => "Fallback mode",
+            "date" => date("Y-m-d"),
             "link" => "#"
         ]
     ];
 }
 
 $attackMetrics = buildAttackMetrics($pdo);
-$selectedDetails = $selectedDay !== "" ? getActivityDayDetails($pdo, $selectedDay) : null;
+$attackChartHtml = renderAttackWeekChart(
+    $attackMetrics["series"],
+    $attackMetrics["labels"],
+    $attackMetrics["dates"]
+);
 
+$alertCount = count($recentVulns);
+$threatScore = getThreatScore($alertCount);
+$passwordHealth = "Strong";
 $feedStatusText = ($feedOnline || $advisoryOnline) ? "Live Feed Online" : "Feed Offline";
 $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-status-bar offline";
-$serverUpdatedLabel = "Updated: " . date("g:i:s A");
 
-$tipLibrary = [
-    "home" => [
-        "Enable MFA on all primary accounts.",
-        "Prioritize known exploited vulnerabilities first.",
-        "Review CISA alerts regularly for active threat guidance.",
-        "Use long, unique passwords for important services.",
-        "Keep browsers and operating systems fully updated.",
-        "Back up important files regularly.",
-        "Limit admin privileges wherever possible.",
-        "Watch for suspicious links and attachments."
-    ]
-];
-
-$currentTips = $tipLibrary["home"];
-
-if ($shuffleTips) {
-    shuffle($currentTips);
-}
-
-if ($tipQuery !== "") {
-    $currentTips = array_values(array_filter($currentTips, function ($tip) use ($tipQuery) {
-        return stripos($tip, $tipQuery) !== false;
-    }));
-} else {
-    $currentTips = array_slice($currentTips, 0, 3);
-}
-
-$maxValue = max($attackMetrics["series"]);
-$chartTop = max($maxValue + 1, 5);
+$displayTips = getTipsForDisplay($tipsSearchQuery, $shuffleTips);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -429,7 +334,7 @@ $chartTop = max($maxValue + 1, 5);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Homepage | Security Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="homepage.css">
 </head>
 <body class="dashboard-body">
@@ -468,7 +373,7 @@ $chartTop = max($maxValue + 1, 5);
                     </div>
 
                     <div class="card-actions">
-                        <div class="<?= htmlspecialchars($liveStatusClass) ?>">
+                        <div class="<?= $liveStatusClass ?>">
                             <span class="live-status-left">
                                 <span class="status-dot"></span>
                                 <span><?= htmlspecialchars($feedStatusText) ?></span>
@@ -476,10 +381,10 @@ $chartTop = max($maxValue + 1, 5);
 
                             <span class="live-status-divider"></span>
 
-                            <span class="live-status-right"><?= htmlspecialchars($serverUpdatedLabel) ?></span>
+                            <span class="live-status-right">Loaded: <?= htmlspecialchars($lastLoadedText) ?></span>
                         </div>
 
-                        <a class="refresh-btn" href="homepage.php">Refresh Feed</a>
+                        <a class="refresh-btn" href="homepage.php?refresh=1">Refresh Feed</a>
                     </div>
 
                     <div class="feed-warning<?= trim($feedError) === '' ? ' hidden-warning' : '' ?>">
@@ -494,7 +399,7 @@ $chartTop = max($maxValue + 1, 5);
                                 <div class="news-meta">
                                     <?= safeText($item["meta"]) ?>
                                     <?php if (!empty($item["date"])): ?>
-                                        <span class="news-date">• <?= safeText($item["date"]) ?></span>
+                                        <span class="news-date"><?= safeText($item["date"]) ?></span>
                                     <?php endif; ?>
                                 </div>
                             </a>
@@ -510,97 +415,27 @@ $chartTop = max($maxValue + 1, 5);
                     <div class="chart-box live-chart-box weekly-chart-box">
                         <div class="weekly-chart-topline">
                             <span>This Week</span>
-                            <span>Click a bar for details</span>
+                            <span>Security Events</span>
                         </div>
 
-                        <div class="attack-week-chart" style="--chart-top: <?= (int)$chartTop ?>;">
-                            <?php foreach ($attackMetrics["series"] as $index => $value): ?>
-                                <?php
-                                $label = $attackMetrics["labels"][$index] ?? "";
-                                $dateText = $attackMetrics["dates"][$index] ?? "";
-                                $isoDate = $attackMetrics["isoDates"][$index] ?? "";
-                                $percent = $value > 0 ? ($value / $chartTop) * 100 : 0;
-                                $isActive = ($selectedDay !== "" && $selectedDay === $isoDate);
-                                ?>
-                                <a
-                                    class="attack-week-col<?= $isActive ? ' active-day' : '' ?>"
-                                    href="homepage.php?activity_day=<?= urlencode($isoDate) ?>#activity-details"
-                                    aria-label="<?= htmlspecialchars($label . ' ' . $dateText . ': ' . $value . ' events') ?>"
-                                >
-                                    <div class="attack-week-plot">
-                                        <div class="attack-week-bar<?= $value === 0 ? ' zero-bar' : '' ?>" style="height: <?= $value > 0 ? htmlspecialchars((string)$percent) . '%' : '8px' ?>;"></div>
-                                    </div>
-                                    <div class="attack-week-value"><?= (int)$value ?></div>
-                                    <div class="attack-week-day"><?= htmlspecialchars($label) ?></div>
-                                    <div class="attack-week-date"><?= htmlspecialchars($dateText) ?></div>
-                                </a>
-                            <?php endforeach; ?>
-                        </div>
+                        <?= $attackChartHtml ?>
                     </div>
 
                     <div class="attack-live-stats">
                         <div class="attack-mini-card">
                             <span class="attack-mini-label">Today</span>
-                            <span class="attack-mini-value"><?= (int)$attackMetrics["currentCount"] ?></span>
+                            <span class="attack-mini-value"><?= (int) $attackMetrics["currentCount"] ?></span>
                         </div>
 
                         <div class="attack-mini-card">
                             <span class="attack-mini-label">This Week</span>
-                            <span class="attack-mini-value"><?= (int)$attackMetrics["weekCount"] ?></span>
+                            <span class="attack-mini-value"><?= (int) $attackMetrics["weekCount"] ?></span>
                         </div>
                     </div>
 
-                    <div class="activity-footer-strip" id="activity-details">
-                        <div class="activity-footer-left">
-                            <div class="activity-footer-icon">✓</div>
-                            <div class="activity-footer-copy">
-                                <div class="activity-footer-title">Latest: Successful Login</div>
-                                <div class="activity-footer-meta">
-                                    <?php if ($selectedDetails && !empty($selectedDetails["rows"])): ?>
-                                        <?= htmlspecialchars($selectedDetails["label"]) ?> • <?= count($selectedDetails["rows"]) ?> event(s) found
-                                    <?php else: ?>
-                                        Click a bar to load details.
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </div>
-
-                        <a class="activity-footer-btn" href="#activity-day-panel">View Details</a>
+                    <div class="chart-meta">
+                        Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
                     </div>
-
-                    <?php if (($selectedDetails && !empty($selectedDetails["rows"])) || $selectedDay !== ""): ?>
-                        <div class="dash-table-like activity-day-panel" id="activity-day-panel">
-                            <?php if ($selectedDetails && !empty($selectedDetails["rows"])): ?>
-                                <?php foreach ($selectedDetails["rows"] as $row): ?>
-                                    <div class="dash-row no-cve-row">
-                                        <span class="row-dot"></span>
-
-                                        <div class="row-main vuln-main">
-                                            <div class="vuln-title"><?= htmlspecialchars(rawText($row["event_type"] ?? "Login Activity")) ?></div>
-                                            <div class="vuln-summary">
-                                                IP: <?= htmlspecialchars(rawText($row["ip"] ?? "N/A")) ?>
-                                                • Location: <?= htmlspecialchars(rawText($row["location_display"] ?? "Unknown")) ?>
-                                            </div>
-                                            <div class="vuln-meta">Time: <?= htmlspecialchars(rawText($row["created_at"] ?? "N/A")) ?></div>
-                                            <div class="vuln-meta">Device: <?= htmlspecialchars(rawText($row["user_agent"] ?? "N/A")) ?></div>
-                                        </div>
-
-                                        <div class="row-side vuln-status-wrap">
-                                            <span class="severity-pill sev-default">Activity</span>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <div class="dash-row no-cve-row">
-                                    <span class="row-dot"></span>
-                                    <div class="row-main vuln-main">
-                                        <div class="vuln-title">No details found</div>
-                                        <div class="vuln-summary">There were no matching activity rows for this selected day.</div>
-                                    </div>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    <?php endif; ?>
                 </div>
             </section>
 
@@ -613,11 +448,11 @@ $chartTop = max($maxValue + 1, 5);
                     <div class="dash-table-like">
                         <?php foreach ($recentVulns as $vuln): ?>
                             <?php
-                            $vendor = trim((string)($vuln["vendorProject"] ?? ""));
-                            $product = trim((string)($vuln["product"] ?? ""));
-                            $summary = trim((string)($vuln["shortDescription"] ?? "No description available."));
+                            $vendor = trim((string) ($vuln["vendorProject"] ?? ""));
+                            $product = trim((string) ($vuln["product"] ?? ""));
+                            $summary = trim((string) ($vuln["shortDescription"] ?? "No description available."));
                             $actionLabel = getActionLabel($vuln["requiredAction"] ?? "");
-                            $dateAdded = trim((string)($vuln["dateAdded"] ?? ""));
+                            $dateAdded = trim((string) ($vuln["dateAdded"] ?? ""));
 
                             $displayTitle = ($vendor !== "" && $product !== "")
                                 ? $vendor . " / " . $product
@@ -651,31 +486,39 @@ $chartTop = max($maxValue + 1, 5);
                     <div class="card-header quick-tips-header">
                         <div class="quick-tips-heading">
                             <h2>Quick Tips</h2>
-                            <p class="quick-tips-subtext">Smart security guidance based on your activity</p>
+                            <p class="quick-tips-subtext">
+                                Smart security guidance based on your activity
+                            </p>
                         </div>
                     </div>
 
-                    <div class="quick-tips-bar">
-                        <form method="get" class="tips-search-wrapper" action="homepage.php">
+                    <form class="quick-tips-bar" method="get" action="homepage.php">
+                        <div class="tips-search-wrapper">
                             <input
                                 type="text"
-                                name="tips_q"
+                                name="tips"
                                 class="tips-search-input"
                                 placeholder="Search tips like MFA, phishing, passwords..."
-                                value="<?= htmlspecialchars($tipQuery) ?>"
-                            >
-                        </form>
+                                value="<?= htmlspecialchars($tipsSearchQuery) ?>">
+                        </div>
 
-                        <a class="refresh-btn" href="homepage.php?shuffle_tips=1">New Tips</a>
-                    </div>
+                        <button type="submit" class="refresh-btn">Search</button>
+                        <a class="refresh-btn" href="homepage.php?shuffle=1">New Tips</a>
+
+                        <?php if ($tipsSearchQuery !== ""): ?>
+                            <a class="refresh-btn secondary-btn" href="homepage.php">Clear</a>
+                        <?php endif; ?>
+                    </form>
 
                     <div class="tips-list">
-                        <?php if (!empty($currentTips)): ?>
-                            <?php foreach ($currentTips as $tip): ?>
+                        <?php if (!empty($displayTips)): ?>
+                            <?php foreach ($displayTips as $tip): ?>
                                 <div class="tip-box"><?= htmlspecialchars($tip) ?></div>
                             <?php endforeach; ?>
                         <?php else: ?>
-                            <div class="empty-state">No tips matched your search.</div>
+                            <div class="empty-state">
+                                No tips matched your search.
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
