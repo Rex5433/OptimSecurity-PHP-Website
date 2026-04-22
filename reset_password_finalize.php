@@ -50,6 +50,24 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             } else {
                 $pdo->beginTransaction();
 
+                $userStmt = $pdo->prepare('
+                    SELECT id, username, name
+                    FROM "Accounts"
+                    WHERE id = :id
+                    LIMIT 1
+                ');
+                $userStmt->execute(['id' => $userId]);
+                $userRow = $userStmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$userRow) {
+                    throw new Exception("User not found during password reset.");
+                }
+
+                $displayName = trim((string) ($userRow["name"] ?? ""));
+                if ($displayName === "") {
+                    $displayName = (string) $userRow["username"];
+                }
+
                 $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
 
                 $updateStmt = $pdo->prepare('
@@ -95,12 +113,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 }
 
                 if ($vaultProfile) {
-                    $stmt = $pdo->prepare('
+                    $touchStmt = $pdo->prepare('
                         UPDATE public.vault_profile
                         SET updated_at = NOW()
                         WHERE user_id = :user_id
                     ');
-                    $stmt->execute([
+                    $touchStmt->execute([
                         'user_id' => $userId
                     ]);
                 }
@@ -110,17 +128,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $_SESSION["password_reset_recovery_key"] = $recoveryKeyInput;
                 $_SESSION["password_reset_new_password"] = $newPassword;
                 $_SESSION["password_reset_new_recovery_key"] = $newRecoveryKey;
-                $_SESSION["password_reset_username_done"] = $username;
+                $_SESSION["password_reset_username_done"] = (string) $userRow["username"];
                 $_SESSION["password_reset_vault_preserved"] = $vaultPreserved ? "1" : "0";
 
                 session_regenerate_id(true);
 
-                $_SESSION["user_id"] = $userId;
-                $_SESSION["user_username"] = $username;
-                $_SESSION["user_name"] = $username;
+                $_SESSION["user_id"] = (int) $userRow["id"];
+                $_SESSION["user_username"] = (string) $userRow["username"];
+                $_SESSION["user_name"] = $displayName;
                 $_SESSION["logged_in"] = true;
 
-                unset($_SESSION["password_reset_user_id"], $_SESSION["password_reset_username"]);
+                unset(
+                    $_SESSION["password_reset_user_id"],
+                    $_SESSION["password_reset_username"]
+                );
 
                 header("Location: reset_password_finalize.php");
                 exit;
