@@ -54,11 +54,13 @@ function finalizeLogin(array $user_row): void
         "successful_login",
         "low",
         "login.php",
-        [
-            "userId" => $user_row["id"],
-            "username" => $user_row["username"]
-        ]
-    );
+    [
+        "userId" => $user_row["id"],
+        "username" => $user_row["username"]
+    ]
+);
+
+die("successful_login was called for user_id=" . $user_row["id"]);
 
     $displayName = trim((string) ($user_row["name"] ?? ""));
     if ($displayName === "") {
