@@ -162,7 +162,7 @@ input:focus {
     transform: translateY(0);
 }
 
-/* ✅ NEW: FIXED ROW FOR FORGOT PASSWORD */
+/* FIXED ROW FOR FORGOT PASSWORD */
 .options-row {
     display: flex;
     justify-content: space-between;
