@@ -40,20 +40,6 @@ function rawText($value, $default = "N/A")
     return $value !== "" ? $value : $default;
 }
 
-function getThreatScore($count)
-{
-    if ($count >= 8) {
-        return "Critical";
-    }
-    if ($count >= 5) {
-        return "High";
-    }
-    if ($count >= 3) {
-        return "Elevated";
-    }
-    return "Low";
-}
-
 function getActionLabel($requiredAction)
 {
     $action = strtolower((string)$requiredAction);
@@ -388,18 +374,6 @@ if ($rawAdvisories !== false) {
     $feedError .= "Unable to load CISA advisories page. ";
 }
 
-if (empty($recentVulns)) {
-    $recentVulns = [
-        [
-            "vendorProject" => "Feed Status",
-            "product" => "Unavailable",
-            "shortDescription" => "Live vulnerability data could not be loaded.",
-            "requiredAction" => "Retry later",
-            "dateAdded" => date("Y-m-d")
-        ]
-    ];
-}
-
 if (empty($newsItems)) {
     $newsItems = [
         [
@@ -415,9 +389,6 @@ if (empty($newsItems)) {
 $attackMetrics = buildAttackMetrics($pdo);
 $selectedDetails = $selectedDay !== "" ? getActivityDayDetails($pdo, $selectedDay) : null;
 
-$alertCount = count($recentVulns);
-$threatScore = getThreatScore($alertCount);
-$passwordHealth = "Strong";
 $feedStatusText = ($feedOnline || $advisoryOnline) ? "Live Feed Online" : "Feed Offline";
 $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-status-bar offline";
 $serverUpdatedLabel = "Updated: " . date("g:i:s A");
@@ -557,7 +528,7 @@ $chartTop = max($maxValue + 1, 5);
                                     aria-label="<?= htmlspecialchars($label . ' ' . $dateText . ': ' . $value . ' events') ?>"
                                 >
                                     <div class="attack-week-plot">
-                                        <div class="attack-week-bar<?= $value === 0 ? ' zero-bar' : '' ?>" style="height: <?= $value > 0 ? htmlspecialchars((string)$percent) : '8' ?>%;"></div>
+                                        <div class="attack-week-bar<?= $value === 0 ? ' zero-bar' : '' ?>" style="height: <?= $value > 0 ? htmlspecialchars((string)$percent) . '%' : '8px' ?>;"></div>
                                     </div>
                                     <div class="attack-week-value"><?= (int)$value ?></div>
                                     <div class="attack-week-day"><?= htmlspecialchars($label) ?></div>
