@@ -36,26 +36,47 @@ if (!$pdo) {
 }
 
 $body = json_decode(file_get_contents("php://input"), true);
-$itemId = isset($body["item_id"]) ? (int) $body["item_id"] : 0;
+
+if (!is_array($body)) {
+    http_response_code(400);
+    echo json_encode([
+        "ok" => false,
+        "error" => "Invalid JSON payload."
+    ]);
+    exit;
+}
+
+$itemId = (int) ($body["item_id"] ?? 0);
 
 if ($itemId <= 0) {
     http_response_code(400);
     echo json_encode([
         "ok" => false,
-        "error" => "Invalid item ID."
+        "error" => "Invalid item id."
     ]);
     exit;
 }
 
 try {
-    $stmt = $pdo->prepare('
-        DELETE FROM public.vault_item
-        WHERE id = :id AND user_id = :user_id
-    ');
+    $stmt = $pdo->prepare("
+        DELETE FROM public.vault_items
+        WHERE id = :id
+          AND user_id = :user_id
+    ");
+
     $stmt->execute([
-        'id' => $itemId,
-        'user_id' => (int) $_SESSION["user_id"]
+        "id" => $itemId,
+        "user_id" => (int) $_SESSION["user_id"]
     ]);
+
+    if ($stmt->rowCount() < 1) {
+        http_response_code(404);
+        echo json_encode([
+            "ok" => false,
+            "error" => "Vault item not found."
+        ]);
+        exit;
+    }
 
     echo json_encode([
         "ok" => true
