@@ -4,6 +4,10 @@
     box-sizing: border-box;
 }
 
+html {
+    scroll-behavior: smooth;
+}
+
 body {
     font-family: sans-serif;
     letter-spacing: 0.2px;
@@ -315,6 +319,8 @@ body {
     background: transparent;
     cursor: pointer;
     padding: 0;
+    text-decoration: none;
+    color: inherit;
 }
 
 .attack-week-col:focus-visible {
@@ -739,6 +745,13 @@ body {
     flex: 1;
     min-width: 280px;
     max-width: 520px;
+    display: block;
+}
+
+.tips-search-wrapper form,
+.quick-tips-bar form {
+    width: 100%;
+    margin: 0;
 }
 
 .tips-search-input {
@@ -752,6 +765,8 @@ body {
     font-size: 14px;
     outline: none;
     transition: 0.2s ease;
+    appearance: none;
+    -webkit-appearance: none;
 }
 
 .tips-search-input::placeholder {
@@ -947,6 +962,9 @@ body {
 }
 
 .activity-footer-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border: 1px solid rgba(39, 233, 181, 0.18);
     background: rgba(39, 233, 181, 0.08);
     color: #27e9b5;
@@ -957,11 +975,16 @@ body {
     cursor: pointer;
     flex-shrink: 0;
     transition: 0.2s ease;
+    text-decoration: none;
 }
 
 .activity-footer-btn:hover {
     background: rgba(39, 233, 181, 0.14);
     color: #ffffff;
+}
+
+.activity-day-panel {
+    margin-top: 16px;
 }
 
 .sidebar-toggle-input {
