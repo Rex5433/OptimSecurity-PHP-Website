@@ -386,6 +386,26 @@ $username = $_SESSION["user_username"] ?? "user";
     </div>
     </div>
 
+    <script>
+        (() => {
+            if (!sessionStorage.getItem("vault_login_password")) {
+                const loginPassword = prompt("Enter your login password for vault setup:");
+                if (loginPassword) {
+                    sessionStorage.setItem("vault_login_password", loginPassword);
+                }
+            }
+            
+            if (!sessionStorage.getItem("vault_recovery_key")) {
+                let recoveryKey = prompt("Create and save a vault recovery key. You will need this to recover your vault later:");
+                if (recoveryKey) {
+                    recoveryKey = recoveryKey.trim();
+                    if (recoveryKey) {
+                        sessionStorage.setItem("vault_recovery_key", recoveryKey);
+                    }
+                }
+            }
+        })();
+    </script>
     <script src="vault_crypto.js?v=300"></script>
     <script src="vault_page.js?v=300"></script>
 </body>
