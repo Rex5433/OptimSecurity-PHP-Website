@@ -23,7 +23,6 @@ body {
     grid-template-columns: 220px 1fr;
     gap: 24px;
     padding: 24px;
-    transition: grid-template-columns 0.3s ease;
 }
 
 .dash-sidebar {
@@ -36,8 +35,6 @@ body {
     flex-direction: column;
     min-height: 0;
     overflow-y: auto;
-    transition: all 0.3s ease;
-    min-width: 0;
 }
 
 .dash-sidebar-title {
@@ -100,8 +97,6 @@ body {
     display: flex;
     flex-direction: column;
     gap: 20px;
-    min-width: 0;
-    position: relative;
 }
 
 .dash-hero {
@@ -110,6 +105,7 @@ body {
     gap: 0px;
 }
 
+/* ===== FIXED HERO TO MATCH VAULT SIZE ===== */
 .dash-title-box {
     background: #0d2534;
     border: 1px solid #25475b;
@@ -200,7 +196,6 @@ body {
 .news-date {
     color: rgba(220, 228, 235, 0.75);
     font-weight: 500;
-    margin-left: 6px;
 }
 
 .news-list {
@@ -252,6 +247,12 @@ body {
     font-size: 0.9rem;
     font-weight: 600;
     color: #5ecbff;
+}
+
+.news-date {
+    margin-left: 6px;
+    color: #5ecbff;
+    font-weight: 600;
 }
 
 .chart-box {
@@ -317,10 +318,10 @@ body {
 }
 
 .chart-meta {
-    margin-top: 14px;
-    font-size: 0.95rem;
+    margin-top: 12px;
+    color: #9bb3c3;
+    font-size: 13px;
     font-weight: 600;
-    color: rgba(220, 228, 235, 0.82);
 }
 
 .attack-live-stats {
@@ -331,26 +332,27 @@ body {
 }
 
 .attack-mini-card {
-    background: rgba(2, 37, 60, 0.9);
-    border: 1px solid rgba(60, 126, 160, 0.35);
-    border-radius: 14px;
-    padding: 18px 20px;
+    background: #082232;
+    border: 1px solid #25475b;
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .attack-mini-label {
-    display: block;
-    font-size: 0.88rem;
+    font-size: 12px;
     font-weight: 700;
-    letter-spacing: 1px;
+    color: #9bb3c3;
     text-transform: uppercase;
-    color: rgba(220, 228, 235, 0.8);
-    margin-bottom: 10px;
+    letter-spacing: 0.4px;
 }
 
 .attack-mini-value {
-    font-size: 2.1rem;
+    font-size: 24px;
     font-weight: 800;
-    color: #2de7bb;
+    color: #27e9b5;
 }
 
 .dash-table-like {
@@ -503,27 +505,10 @@ body {
     cursor: pointer;
 }
 
-button.refresh-btn {
-    appearance: none;
-    -webkit-appearance: none;
-    font-family: inherit;
-}
-
 .refresh-btn:hover {
     background: rgba(39, 233, 181, 0.14);
     color: #ffffff;
     box-shadow: 0 12px 22px rgba(0, 0, 0, 0.26);
-}
-
-.secondary-btn {
-    border-color: rgba(123, 187, 254, 0.18);
-    background: rgba(123, 187, 254, 0.08);
-    color: #9accff;
-}
-
-.secondary-btn:hover {
-    background: rgba(123, 187, 254, 0.14);
-    color: #ffffff;
 }
 
 .live-status-bar {
@@ -585,40 +570,21 @@ button.refresh-btn {
     color: #9bb3c3;
     font-size: 14px;
     text-align: center;
-    margin-top: 10px;
 }
 
 .tips-list {
-    display: grid;
-    gap: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .tip-box {
-    position: relative;
     background: #041c2b;
     border: 1px solid #25475b;
     border-radius: 8px;
-    padding: 18px 18px 18px 22px;
+    padding: 16px;
     color: #d7e7f1;
     font-size: 14px;
-    line-height: 1.5;
-    transition: 0.2s ease;
-}
-
-.tip-box::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 14px;
-    bottom: 14px;
-    width: 4px;
-    border-radius: 10px;
-    background: linear-gradient(180deg, #27e9b5, #7bbbfe);
-}
-
-.tip-box:hover {
-    transform: translateY(-3px);
-    border-color: rgba(39, 233, 181, 0.3);
 }
 
 .dash-features {
@@ -746,6 +712,45 @@ button.refresh-btn {
 .quick-tips-bar .refresh-btn {
     height: 46px;
     padding: 0 18px;
+    border-radius: 8px;
+}
+
+.tips-list {
+    display: grid;
+    gap: 14px;
+}
+
+.tip-box {
+    position: relative;
+    background: #041c2b;
+    border: 1px solid #25475b;
+    border-radius: 8px;
+    padding: 18px 18px 18px 22px;
+    color: #d7e7f1;
+    font-size: 14px;
+    line-height: 1.5;
+    transition: 0.2s ease;
+}
+
+.tip-box::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 14px;
+    bottom: 14px;
+    width: 4px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #27e9b5, #7bbbfe);
+}
+
+.tip-box:hover {
+    transform: translateY(-3px);
+    border-color: rgba(39, 233, 181, 0.3);
+}
+
+.empty-state {
+    margin-top: 10px;
+    color: #8fb3c7;
 }
 
 .weekly-chart-box {
@@ -846,8 +851,57 @@ button.refresh-btn {
     z-index: 1;
 }
 
+.attack-mini-card {
+    background: rgba(2, 37, 60, 0.9);
+    border: 1px solid rgba(60, 126, 160, 0.35);
+    border-radius: 14px;
+    padding: 18px 20px;
+}
+
+.attack-mini-label {
+    display: block;
+    font-size: 0.88rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(220, 228, 235, 0.8);
+    margin-bottom: 10px;
+}
+
+.attack-mini-value {
+    font-size: 2.1rem;
+    font-weight: 800;
+    color: #2de7bb;
+}
+
+.chart-meta {
+    margin-top: 14px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: rgba(220, 228, 235, 0.82);
+}
+
 .sidebar-toggle-input {
     display: none;
+}
+
+.dash-shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 24px;
+    padding: 24px;
+    transition: grid-template-columns 0.3s ease;
+}
+
+.dash-sidebar {
+    transition: all 0.3s ease;
+    min-width: 0;
+}
+
+.dash-main {
+    min-width: 0;
+    position: relative;
 }
 
 .dash-top-controls {
