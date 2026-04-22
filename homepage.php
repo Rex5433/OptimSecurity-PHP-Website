@@ -11,7 +11,6 @@ if (!isset($_SESSION["user_id"])) {
     exit;
 }
 
-require_once __DIR__ . "/attack_helpers.php";
 require_once __DIR__ . "/db.php";
 
 $name = $_SESSION["user_name"] ?? "User";
@@ -75,30 +74,119 @@ function fetchUrl($url)
     return @file_get_contents($url, false, $context);
 }
 
+function getLoginActivityColumns(PDO $pdo): array
+{
+    static $cached = null;
+
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'login_activity'
+    ");
+    $stmt->execute();
+
+    $cached = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+    return $cached;
+}
+
+function firstExistingColumn(array $columns, array $candidates): ?string
+{
+    foreach ($candidates as $candidate) {
+        if (in_array($candidate, $columns, true)) {
+            return $candidate;
+        }
+    }
+    return null;
+}
+
+function quoteIdent(string $identifier): string
+{
+    return '"' . str_replace('"', '""', $identifier) . '"';
+}
+
+function getLoginActivityColumnMap(PDO $pdo): array
+{
+    $columns = getLoginActivityColumns($pdo);
+
+    return [
+        "timestamp"  => firstExistingColumn($columns, ["created_at", "login_at", "event_time", "occurred_at", "timestamp"]),
+        "ip"         => firstExistingColumn($columns, ["ip_address", "ip_addr", "ip"]),
+        "location"   => firstExistingColumn($columns, ["location", "geo_location"]),
+        "city"       => firstExistingColumn($columns, ["city"]),
+        "region"     => firstExistingColumn($columns, ["region", "state", "province"]),
+        "country"    => firstExistingColumn($columns, ["country"]),
+        "event_type" => firstExistingColumn($columns, ["event_type", "type", "activity_type"]),
+        "user_agent" => firstExistingColumn($columns, ["user_agent", "device_info", "device"]),
+        "user_id"    => firstExistingColumn($columns, ["user_id", "account_id"]),
+    ];
+}
+
 function buildAttackMetrics(PDO $pdo): array
 {
+    $map = getLoginActivityColumnMap($pdo);
+    $timeCol = $map["timestamp"];
+
     $series = [];
     $labels = [];
     $dates = [];
+    $isoDates = [];
     $weekCount = 0;
+
+    if ($timeCol === null) {
+        for ($i = 6; $i >= 0; $i--) {
+            $dayTs = strtotime("-$i days");
+            $series[] = 0;
+            $labels[] = date("D", $dayTs);
+            $dates[] = date("M j", $dayTs);
+            $isoDates[] = date("Y-m-d", $dayTs);
+        }
+
+        return [
+            "series" => $series,
+            "labels" => $labels,
+            "dates" => $dates,
+            "isoDates" => $isoDates,
+            "currentCount" => 0,
+            "weekCount" => 0,
+            "latestType" => "No Activity Column Found"
+        ];
+    }
+
+    $sql = "
+        SELECT COUNT(*)
+        FROM public.login_activity
+        WHERE " . quoteIdent($timeCol) . " >= ?
+          AND " . quoteIdent($timeCol) . " < ?
+    ";
+
+    if ($map["user_id"] !== null && isset($_SESSION["user_id"])) {
+        $sql .= " AND " . quoteIdent($map["user_id"]) . " = ?";
+    }
+
+    $stmt = $pdo->prepare($sql);
 
     for ($i = 6; $i >= 0; $i--) {
         $dayTs = strtotime("-$i days");
         $dayStart = date("Y-m-d 00:00:00", $dayTs);
-        $dayEnd = date("Y-m-d 23:59:59", $dayTs);
+        $dayEnd = date("Y-m-d 00:00:00", strtotime("+1 day", strtotime($dayStart)));
 
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*)
-            FROM public.login_activity
-            WHERE created_at BETWEEN ? AND ?
-        ");
-        $stmt->execute([$dayStart, $dayEnd]);
+        $params = [$dayStart, $dayEnd];
+        if ($map["user_id"] !== null && isset($_SESSION["user_id"])) {
+            $params[] = $_SESSION["user_id"];
+        }
 
+        $stmt->execute($params);
         $count = (int) $stmt->fetchColumn();
 
         $series[] = $count;
-        $labels[] = date("D", strtotime($dayStart));
-        $dates[] = date("M j", strtotime($dayStart));
+        $labels[] = date("D", $dayTs);
+        $dates[] = date("M j", $dayTs);
+        $isoDates[] = date("Y-m-d", $dayTs);
         $weekCount += $count;
     }
 
@@ -111,7 +199,8 @@ function buildAttackMetrics(PDO $pdo): array
         "series" => $series,
         "labels" => $labels,
         "dates" => $dates,
-        "currentCount" => $todayCount,
+        "isoDates" => $isoDates,
+        "currentCount" => (int) $todayCount,
         "weekCount" => $weekCount,
         "latestType" => "Activity Recorded"
     ];
@@ -221,7 +310,6 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -229,7 +317,6 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="homepage.css">
 </head>
-
 <body class="dashboard-body">
     <div class="dash-shell">
         <aside class="dash-sidebar">
@@ -304,7 +391,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     <div class="chart-box live-chart-box weekly-chart-box">
                         <div class="weekly-chart-topline">
                             <span>This Week</span>
-                            <span>Security Events</span>
+                            <span>Click a bar for details</span>
                         </div>
 
                         <div class="attack-week-chart" id="attackWeekChart"></div>
@@ -326,6 +413,46 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 
                     <div class="chart-meta" id="attackTrendMeta">
                         Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
+                    </div>
+
+                    <div class="activity-summary-box" id="activitySummaryBox">
+                        <div class="activity-summary-top">
+                            <div>
+                                <div class="activity-summary-title">Selected Day</div>
+                                <div class="activity-summary-date" id="activitySummaryDate">Click a bar to view details</div>
+                            </div>
+
+                            <div class="activity-summary-total">
+                                <span class="activity-summary-total-label">Events</span>
+                                <span class="activity-summary-total-value" id="activitySummaryTotal">0</span>
+                            </div>
+                        </div>
+
+                        <div class="activity-summary-grid">
+                            <div class="activity-summary-item">
+                                <span class="activity-summary-label">IP Address</span>
+                                <strong id="activitySummaryIp">N/A</strong>
+                            </div>
+
+                            <div class="activity-summary-item">
+                                <span class="activity-summary-label">Location</span>
+                                <strong id="activitySummaryLocation">N/A</strong>
+                            </div>
+
+                            <div class="activity-summary-item">
+                                <span class="activity-summary-label">Event</span>
+                                <strong id="activitySummaryEvent">N/A</strong>
+                            </div>
+
+                            <div class="activity-summary-item">
+                                <span class="activity-summary-label">Time</span>
+                                <strong id="activitySummaryTime">N/A</strong>
+                            </div>
+                        </div>
+
+                        <div class="activity-summary-note" id="activitySummaryNote">
+                            Click any day bar above.
+                        </div>
                     </div>
                 </div>
             </section>
@@ -462,6 +589,14 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
         const attackCurrentCount = document.getElementById("attackCurrentCount");
         const attackWeekCount = document.getElementById("attackWeekCount");
 
+        const activitySummaryDate = document.getElementById("activitySummaryDate");
+        const activitySummaryTotal = document.getElementById("activitySummaryTotal");
+        const activitySummaryIp = document.getElementById("activitySummaryIp");
+        const activitySummaryLocation = document.getElementById("activitySummaryLocation");
+        const activitySummaryEvent = document.getElementById("activitySummaryEvent");
+        const activitySummaryTime = document.getElementById("activitySummaryTime");
+        const activitySummaryNote = document.getElementById("activitySummaryNote");
+
         const tipsList = document.getElementById("tipsList");
         const tipsSearch = document.getElementById("tipsSearch");
         const shuffleTipsBtn = document.getElementById("shuffleTipsBtn");
@@ -488,10 +623,10 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     : `${escapeHtml(item.meta || "")}`;
 
                 a.innerHTML = `
-            <div class="news-head">${escapeHtml(item.title || "Untitled Update")}</div>
-            <div class="news-sub">${escapeHtml(item.summary || "")}</div>
-            <div class="news-meta">${metaText}</div>
-        `;
+                    <div class="news-head">${escapeHtml(item.title || "Untitled Update")}</div>
+                    <div class="news-sub">${escapeHtml(item.summary || "")}</div>
+                    <div class="news-meta">${metaText}</div>
+                `;
 
                 newsList.appendChild(a);
             });
@@ -509,25 +644,82 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     : "";
 
                 row.innerHTML = `
-            <span class="row-dot"></span>
-            <div class="row-main vuln-main">
-                <div class="vuln-title">${escapeHtml(item.title || "Unnamed Vulnerability")}</div>
-                <div class="vuln-summary">${escapeHtml(item.summary || "No description available.")}</div>
-                ${metaHtml}
-            </div>
-            <div class="row-side vuln-status-wrap">
-                <span class="severity-pill sev-default">Known Exploited</span>
-            </div>
-            <div class="row-side vuln-action-wrap">
-                <span class="vuln-action">${escapeHtml(item.action || "Review")}</span>
-            </div>
-        `;
+                    <span class="row-dot"></span>
+                    <div class="row-main vuln-main">
+                        <div class="vuln-title">${escapeHtml(item.title || "Unnamed Vulnerability")}</div>
+                        <div class="vuln-summary">${escapeHtml(item.summary || "No description available.")}</div>
+                        ${metaHtml}
+                    </div>
+                    <div class="row-side vuln-status-wrap">
+                        <span class="severity-pill sev-default">Known Exploited</span>
+                    </div>
+                    <div class="row-side vuln-action-wrap">
+                        <span class="vuln-action">${escapeHtml(item.action || "Review")}</span>
+                    </div>
+                `;
 
                 vulnList.appendChild(row);
             });
         }
 
-        function renderAttackWeek(series, labels, dates) {
+        function renderActivityDetails(payload) {
+            const rows = Array.isArray(payload.rows) ? payload.rows : [];
+            const label = payload.label || "Selected Day";
+            const total = Number(payload.total || 0);
+            const first = rows.length ? rows[0] : null;
+
+            activitySummaryDate.textContent = label;
+            activitySummaryTotal.textContent = String(total);
+
+            if (!first) {
+                activitySummaryIp.textContent = "N/A";
+                activitySummaryLocation.textContent = "N/A";
+                activitySummaryEvent.textContent = "N/A";
+                activitySummaryTime.textContent = "N/A";
+                activitySummaryNote.textContent = "No activity details found for this day.";
+                return;
+            }
+
+            activitySummaryIp.textContent = first.ip || "N/A";
+            activitySummaryLocation.textContent = first.location || "Unknown";
+            activitySummaryEvent.textContent = first.event_type || "Login Activity";
+            activitySummaryTime.textContent = first.created_at || "N/A";
+            activitySummaryNote.textContent = total > 1
+                ? `Showing latest event out of ${total} total events for this day.`
+                : "Showing latest event for this day.";
+        }
+
+        async function openActivityDay(dayIso, label) {
+            activitySummaryDate.textContent = label;
+            activitySummaryTotal.textContent = "...";
+            activitySummaryIp.textContent = "Loading...";
+            activitySummaryLocation.textContent = "Loading...";
+            activitySummaryEvent.textContent = "Loading...";
+            activitySummaryTime.textContent = "Loading...";
+            activitySummaryNote.textContent = "Loading day details...";
+
+            try {
+                const response = await fetch("login_activity_day.php?day=" + encodeURIComponent(dayIso) + "&ts=" + Date.now(), {
+                    cache: "no-store"
+                });
+
+                if (!response.ok) {
+                    throw new Error("Failed to load activity details");
+                }
+
+                const data = await response.json();
+                renderActivityDetails(data);
+            } catch (error) {
+                activitySummaryTotal.textContent = "0";
+                activitySummaryIp.textContent = "N/A";
+                activitySummaryLocation.textContent = "N/A";
+                activitySummaryEvent.textContent = "N/A";
+                activitySummaryTime.textContent = "N/A";
+                activitySummaryNote.textContent = "Could not load day details.";
+            }
+        }
+
+        function renderAttackWeek(series, labels, dates, isoDates) {
             const safeSeries = Array.isArray(series) && series.length > 0
                 ? series.map(value => Number(value) || 0)
                 : [0, 0, 0, 0, 0, 0, 0];
@@ -540,6 +732,10 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 ? dates
                 : ["", "", "", "", "", "", ""];
 
+            const safeIsoDates = Array.isArray(isoDates) && isoDates.length === safeSeries.length
+                ? isoDates
+                : ["", "", "", "", "", "", ""];
+
             const maxValue = Math.max(...safeSeries, 0);
             const latestIndex = safeSeries.length - 1;
             const hasAnyData = maxValue > 0;
@@ -547,11 +743,13 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
             attackWeekChart.innerHTML = "";
 
             safeSeries.forEach((value, index) => {
-                const col = document.createElement("div");
-                col.className = "attack-week-col";
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "attack-week-col";
+                button.setAttribute("aria-label", `${safeLabels[index]} ${safeDates[index]}: ${value} events`);
 
                 if (index === latestIndex) {
-                    col.classList.add("active-day");
+                    button.classList.add("active-day");
                 }
 
                 const plot = document.createElement("div");
@@ -570,7 +768,6 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 }
 
                 bar.style.height = `${percent}%`;
-                bar.title = `${safeLabels[index]} ${safeDates[index]}: ${value} event${value === 1 ? "" : "s"}`;
 
                 const day = document.createElement("div");
                 day.className = "attack-week-day";
@@ -581,11 +778,16 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 date.textContent = safeDates[index];
 
                 plot.appendChild(bar);
-                col.appendChild(plot);
-                col.appendChild(day);
-                col.appendChild(date);
+                button.appendChild(plot);
+                button.appendChild(day);
+                button.appendChild(date);
 
-                attackWeekChart.appendChild(col);
+                button.addEventListener("click", function () {
+                    const label = `${safeLabels[index]} ${safeDates[index]}`;
+                    openActivityDay(safeIsoDates[index], label);
+                });
+
+                attackWeekChart.appendChild(button);
             });
 
             if (!hasAnyData) {
@@ -596,8 +798,8 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
             }
         }
 
-        function updateAttackActivity(series, labels, dates, latestType, currentCount, weekCount) {
-            renderAttackWeek(series, labels, dates);
+        function updateAttackActivity(series, labels, dates, isoDates, latestType, currentCount, weekCount) {
+            renderAttackWeek(series, labels, dates, isoDates);
             attackCurrentCount.textContent = String(currentCount ?? 0);
             attackWeekCount.textContent = String(weekCount ?? 0);
             attackTrendMeta.textContent = `Latest: ${latestType || "No Recent Activity"}`;
@@ -619,14 +821,17 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 feedWarning.classList.add("hidden-warning");
             }
 
-            updateAttackActivity(
-                data.attackSeries || [],
-                data.attackLabels || [],
-                data.attackDates || [],
-                data.attackLatestType || "No Recent Activity",
-                data.attackCurrentCount || 0,
-                data.attackWeekCount || 0
-            );
+            if (data.attackSeries) {
+                updateAttackActivity(
+                    data.attackSeries || [],
+                    data.attackLabels || [],
+                    data.attackDates || [],
+                    data.attackIsoDates || [],
+                    data.attackLatestType || "No Recent Activity",
+                    data.attackCurrentCount || 0,
+                    data.attackWeekCount || 0
+                );
+            }
         }
 
         let currentTool = "home";
@@ -771,6 +976,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
             <?= json_encode($attackMetrics["series"]) ?>,
             <?= json_encode($attackMetrics["labels"]) ?>,
             <?= json_encode($attackMetrics["dates"]) ?>,
+            <?= json_encode($attackMetrics["isoDates"]) ?>,
             <?= json_encode($attackMetrics["latestType"]) ?>,
             <?= (int) $attackMetrics["currentCount"] ?>,
             <?= (int) $attackMetrics["weekCount"] ?>
@@ -785,5 +991,4 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
         }, 60000);
     </script>
 </body>
-
 </html>
