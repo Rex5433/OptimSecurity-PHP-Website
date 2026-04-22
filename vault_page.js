@@ -66,6 +66,12 @@
     const noteTitle = document.getElementById("noteTitle");
     const noteContent = document.getElementById("noteContent");
 
+    const folderModal = document.getElementById("folderModal");
+    const folderNameInput = document.getElementById("folderNameInput");
+    const saveFolderBtn = document.getElementById("saveFolderBtn");
+    const cancelFolderBtn = document.getElementById("cancelFolderBtn");
+    const folderMessage = document.getElementById("folderMessage");
+
     let items = [];
     let knownFolders = [];
     let selectedType = "all";
@@ -119,6 +125,29 @@
         return data;
     }
 
+    function getRecoveryKeyForVaultInit() {
+        const direct = sessionStorage.getItem("vault_recovery_key") || "";
+        if (direct) return direct;
+
+        const fromReset = sessionStorage.getItem("vault_new_recovery_key") || "";
+        if (fromReset) return fromReset;
+
+        return "";
+    }
+
+    function profileHasRequiredFields(profile) {
+        return !!(
+            profile &&
+            profile.vault_salt &&
+            profile.vault_iterations &&
+            profile.vault_key_check &&
+            profile.wrapped_vault_key &&
+            profile.wrapped_vault_key_iv &&
+            profile.wrapped_vault_key_recovery &&
+            profile.wrapped_vault_key_recovery_iv
+        );
+    }
+
     async function bootstrapVaultKey() {
         const password = sessionStorage.getItem("vault_login_password") || "";
         if (!password) {
@@ -128,7 +157,12 @@
         const profileRes = await apiFetch("vault_profile.php");
 
         if (!profileRes.exists || !profileRes.profile) {
-            const created = await window.VaultCrypto.createVaultProfile(password);
+            const recoveryKey = getRecoveryKeyForVaultInit();
+            if (!recoveryKey) {
+                throw new Error("No recovery key found for vault initialization.");
+            }
+
+            const created = await window.VaultCrypto.createVaultProfile(password, recoveryKey);
 
             await apiFetch("vault_init.php", {
                 method: "POST",
@@ -138,7 +172,9 @@
                     vault_iterations: created.iterations,
                     vault_key_check: created.vault_key_check,
                     wrapped_vault_key: created.wrapped_vault_key,
-                    wrapped_vault_key_iv: created.wrapped_vault_key_iv
+                    wrapped_vault_key_iv: created.wrapped_vault_key_iv,
+                    wrapped_vault_key_recovery: created.wrapped_vault_key_recovery,
+                    wrapped_vault_key_recovery_iv: created.wrapped_vault_key_recovery_iv
                 })
             });
 
@@ -146,7 +182,13 @@
             return;
         }
 
-        vaultKey = await window.VaultCrypto.unlockVaultFromProfile(password, profileRes.profile);
+        const profile = profileRes.profile;
+
+        if (!profileHasRequiredFields(profile)) {
+            throw new Error("Missing vault profile fields.");
+        }
+
+        vaultKey = await window.VaultCrypto.unlockVaultFromProfile(password, profile);
     }
 
     function showTemplate(type) {
@@ -456,6 +498,10 @@
     async function loadItems() {
         clearMessage(pageMessage);
 
+        if (!vaultKey) {
+            throw new Error("Vault is locked.");
+        }
+
         const data = await apiFetch("vault_list.php");
         const decrypted = [];
 
@@ -559,8 +605,6 @@
                 iv: encrypted.iv
             };
 
-            console.log("vault save requestBody =", requestBody);
-
             await apiFetch("vault_save.php", {
                 method: "POST",
                 headers: {
@@ -658,9 +702,37 @@
         }
     });
 
+    function openFolderModal() {
+        if (!folderModal) return;
+
+        folderNameInput.value = "";
+        clearMessage(folderMessage);
+
+        folderModal.classList.remove("hidden");
+        folderNameInput.focus();
+    }
+
+    function closeFolderModal() {
+        if (!folderModal) return;
+
+        folderModal.classList.add("hidden");
+        folderNameInput.value = "";
+        clearMessage(folderMessage);
+    }
+
     if (newItemBtn) newItemBtn.addEventListener("click", () => openItemModal(null));
     if (cancelItemBtn) cancelItemBtn.addEventListener("click", closeItemModal);
-    if (refreshBtn) refreshBtn.addEventListener("click", loadItems);
+    if (refreshBtn) refreshBtn.addEventListener("click", () => {
+        bootstrapVaultKey()
+            .then(loadItems)
+            .catch((error) => {
+                console.error(error);
+                setMessage(pageMessage, error.message || "Could not load vault items.", "error");
+                if (vaultList) {
+                    vaultList.innerHTML = `<div class="vault-empty">Could not load vault items.</div>`;
+                }
+            });
+    });
     if (searchInput) searchInput.addEventListener("input", renderItems);
 
     if (typeFilter) {
@@ -703,30 +775,6 @@
             renderItems();
         });
     });
-
-    const folderModal = document.getElementById("folderModal");
-    const folderNameInput = document.getElementById("folderNameInput");
-    const saveFolderBtn = document.getElementById("saveFolderBtn");
-    const cancelFolderBtn = document.getElementById("cancelFolderBtn");
-    const folderMessage = document.getElementById("folderMessage");
-
-    function openFolderModal() {
-        if (!folderModal) return;
-
-        folderNameInput.value = "";
-        clearMessage(folderMessage);
-
-        folderModal.classList.remove("hidden");
-        folderNameInput.focus();
-    }
-
-    function closeFolderModal() {
-        if (!folderModal) return;
-
-        folderModal.classList.add("hidden");
-        folderNameInput.value = "";
-        clearMessage(folderMessage);
-    }
 
     if (newFolderBtn) {
         newFolderBtn.addEventListener("click", openFolderModal);
