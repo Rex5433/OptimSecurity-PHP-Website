@@ -193,6 +193,12 @@ input:focus {
     line-height: 1;
 }
 
+/* CREATE ACCOUNT SHOW PASSWORD ROW */
+.create-account-options {
+    justify-content: flex-start;
+    margin-top: -6px;
+}
+
 .forgot-link {
     font-size: 14px;
     font-weight: 600;

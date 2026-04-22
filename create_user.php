@@ -143,10 +143,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     <input type="password" name="confirm_password" id="confirm_password" required>
                 </div>
 
-                <div class="form-group" style="margin-top: -6px;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <div class="options-row create-account-options">
+                    <label class="checkbox-container">
                         <input type="checkbox" onclick="togglePasswords()">
-                        Show Passwords
+                        <span>Show Passwords</span>
                     </label>
                 </div>
 
