@@ -30,7 +30,90 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     );
 }
 
-function finalizeLogin(array $user_row): void
+function getClientIpAddress(): string
+{
+    $keys = [
+        "HTTP_CF_CONNECTING_IP",
+        "HTTP_X_FORWARDED_FOR",
+        "HTTP_X_REAL_IP",
+        "REMOTE_ADDR"
+    ];
+
+    foreach ($keys as $key) {
+        if (!empty($_SERVER[$key])) {
+            $value = trim((string) $_SERVER[$key]);
+
+            if ($key === "HTTP_X_FORWARDED_FOR" && str_contains($value, ",")) {
+                $parts = explode(",", $value);
+                $value = trim((string) ($parts[0] ?? ""));
+            }
+
+            if ($value !== "") {
+                return $value;
+            }
+        }
+    }
+
+    return "Unknown";
+}
+
+function insertLoginActivity(
+    PDO $pdo,
+    ?int $userId,
+    string $eventType,
+    ?string $username = null,
+    ?string $location = null,
+    ?string $city = null,
+    ?string $region = null,
+    ?string $country = null
+): void {
+    try {
+        $ipAddress = getClientIpAddress();
+        $userAgent = trim((string) ($_SERVER["HTTP_USER_AGENT"] ?? ""));
+
+        $stmt = $pdo->prepare("
+            INSERT INTO public.login_activity
+            (
+                user_id,
+                created_at,
+                event_type,
+                ip_address,
+                location,
+                city,
+                region,
+                country,
+                user_agent
+            )
+            VALUES
+            (
+                :user_id,
+                NOW(),
+                :event_type,
+                :ip_address,
+                :location,
+                :city,
+                :region,
+                :country,
+                :user_agent
+            )
+        ");
+
+        $stmt->bindValue(":user_id", $userId, $userId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+        $stmt->bindValue(":event_type", $eventType, PDO::PARAM_STR);
+        $stmt->bindValue(":ip_address", $ipAddress !== "" ? $ipAddress : null, $ipAddress !== "" ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(":location", $location, $location !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(":city", $city, $city !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(":region", $region, $region !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(":country", $country, $country !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+        $stmt->bindValue(":user_agent", $userAgent !== "" ? $userAgent : null, $userAgent !== "" ? PDO::PARAM_STR : PDO::PARAM_NULL);
+
+        $stmt->execute();
+    } catch (Throwable $e) {
+        error_log("login_activity insert failed: " . $e->getMessage());
+    }
+}
+
+function finalizeLogin(array $user_row, PDO $pdo): void
 {
     session_regenerate_id(true);
 
@@ -45,6 +128,13 @@ function finalizeLogin(array $user_row): void
     $_SESSION["user_name"] = $user_row["name"];
     $_SESSION["user_username"] = $user_row["username"];
     $_SESSION["logged_in"] = true;
+
+    insertLoginActivity(
+        $pdo,
+        (int) $user_row["id"],
+        "successful_login",
+        (string) ($user_row["username"] ?? "")
+    );
 
     logAttackEvent(
         "successful_login",
@@ -65,6 +155,13 @@ function finalizeLogin(array $user_row): void
         $isNewDevice = trackUserDevice((int) $user_row["id"], $displayName);
 
         if ($isNewDevice) {
+            insertLoginActivity(
+                $pdo,
+                (int) $user_row["id"],
+                "new_device_login",
+                (string) ($user_row["username"] ?? "")
+            );
+
             logAttackEvent(
                 "new_device_login",
                 "high",
@@ -87,6 +184,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     if ($username === "" || $password_input === "") {
         $message = "Please fill in all fields.";
+
+        if ($pdo instanceof PDO) {
+            insertLoginActivity(
+                $pdo,
+                null,
+                "failed_login_form_error",
+                $username !== "" ? $username : null
+            );
+        }
 
         logAttackEvent(
             "failed_login_form_error",
@@ -143,6 +249,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $_SESSION["pending_2fa_username"] = $user_row["username"];
                 $_SESSION["pending_2fa_verified_at"] = time();
 
+                insertLoginActivity(
+                    $pdo,
+                    (int) $user_row["id"],
+                    "password_verified_2fa_pending",
+                    (string) ($user_row["username"] ?? "")
+                );
+
                 logAttackEvent(
                     "password_verified_2fa_pending",
                     "medium",
@@ -157,9 +270,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 exit;
             }
 
-            finalizeLogin($user_row);
+            finalizeLogin($user_row, $pdo);
         } else {
             $message = "Invalid username or password.";
+
+            insertLoginActivity(
+                $pdo,
+                null,
+                "failed_login",
+                $username !== "" ? $username : null
+            );
 
             logAttackEvent(
                 "failed_login",
