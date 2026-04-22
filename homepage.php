@@ -93,11 +93,7 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
             FROM public.login_activity
             WHERE user_id = ?
               AND created_at BETWEEN ? AND ?
-              AND (
-                    event_type = 'login_success'
-                    OR event_type = 'successful_login'
-                    OR event_type = 'login'
-                  )
+              AND LOWER(TRIM(COALESCE(event_type, ''))) = 'successful_login'
         ");
         $stmt->execute([$userId, $dayStart, $dayEnd]);
 
@@ -120,7 +116,7 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
         "dates" => $dates,
         "currentCount" => $todayCount,
         "weekCount" => $weekCount,
-        "latestType" => "Successful Login"
+        "latestType" => $weekCount > 0 ? "Successful Login" : "No Recent Activity"
     ];
 }
 
