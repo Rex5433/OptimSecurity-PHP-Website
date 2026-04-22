@@ -67,6 +67,25 @@ if (
 }
 
 try {
+    $checkStmt = $pdo->prepare('
+        SELECT 1
+        FROM public.vault_profile
+        WHERE user_id = :user_id
+        LIMIT 1
+    ');
+    $checkStmt->execute([
+        'user_id' => $userId
+    ]);
+
+    if (!$checkStmt->fetchColumn()) {
+        http_response_code(404);
+        echo json_encode([
+            "ok" => false,
+            "error" => "Vault profile not found for this user."
+        ]);
+        exit;
+    }
+
     $stmt = $pdo->prepare('
         UPDATE public.vault_profile
         SET wrapped_vault_key = :wrapped_vault_key,
@@ -85,8 +104,18 @@ try {
         'user_id' => $userId
     ]);
 
+    if ($stmt->rowCount() < 1) {
+        http_response_code(500);
+        echo json_encode([
+            "ok" => false,
+            "error" => "Vault profile rewrap update did not modify any rows."
+        ]);
+        exit;
+    }
+
     echo json_encode([
-        "ok" => true
+        "ok" => true,
+        "message" => "Vault profile rewrapped successfully."
     ]);
 } catch (Throwable $e) {
     http_response_code(500);
