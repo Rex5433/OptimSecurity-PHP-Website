@@ -304,6 +304,35 @@ body {
     background-size: 100% 52px;
 }
 
+.attack-week-col {
+    display: grid;
+    grid-template-rows: 150px auto auto;
+    align-items: end;
+    justify-items: center;
+    min-width: 0;
+    z-index: 2;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+}
+
+.attack-week-col:focus-visible {
+    outline: 2px solid #27e9b5;
+    outline-offset: 3px;
+    border-radius: 12px;
+}
+
+.attack-week-col:hover .attack-week-bar,
+.attack-week-col.active-day .attack-week-bar {
+    transform: translateY(-2px);
+    filter: brightness(1.08);
+}
+
+.attack-week-bar {
+    transition: height 0.25s ease, transform 0.18s ease, filter 0.18s ease;
+}
+
 .attack-bar-col {
     height: 100%;
     display: flex;
@@ -1010,6 +1039,7 @@ body {
     .activity-summary-top {
         flex-direction: column;
         align-items: flex-start;
+        gap: 12px;
     }
 
     .activity-summary-total {
@@ -1018,6 +1048,10 @@ body {
 
     .activity-summary-grid {
         grid-template-columns: 1fr;
+    }
+
+    .activity-summary-total-value {
+        font-size: 1.7rem;
     }
 }
 
