@@ -254,12 +254,11 @@ input:focus {
 
 /* LOGIN LOGO */
 
-.login-logo {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 22px;
-    position: relative;
-    z-index: 1;
+.login-logo img {
+    width: 220px;
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
 }
 
 .login-logo img {
