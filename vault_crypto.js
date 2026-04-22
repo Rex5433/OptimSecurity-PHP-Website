@@ -4,7 +4,7 @@ window.VaultCrypto = (() => {
 
     function isLocalhost() {
         const host = window.location.hostname || "";
-        return host === "localhost" || host === "::1";
+        return host === "localhost" || host === "::1" || host === "127.0.0.1";
     }
 
     function getCryptoObject() {
@@ -23,15 +23,6 @@ window.VaultCrypto = (() => {
         const cryptoObj = getCryptoObject();
         const subtle = getSubtleCrypto();
 
-        console.log("VaultCrypto debug:", {
-            href: window.location.href,
-            protocol,
-            hostname: host,
-            isSecureContext: window.isSecureContext,
-            hasCrypto: !!cryptoObj,
-            hasSubtle: !!subtle
-        });
-
         const allowedContext =
             window.isSecureContext ||
             (protocol === "http:" && isLocalhost());
@@ -48,10 +39,7 @@ window.VaultCrypto = (() => {
             );
         }
 
-        return {
-            cryptoObj,
-            subtle
-        };
+        return { cryptoObj, subtle };
     }
 
     function arrayBufferToBase64(buffer) {
@@ -81,12 +69,12 @@ window.VaultCrypto = (() => {
         return arrayBufferToBase64(randomBytes(length).buffer);
     }
 
-    async function deriveWrappingKey(password, saltBase64, iterations = 210000) {
+    async function deriveWrappingKey(secret, saltBase64, iterations = 210000) {
         const { subtle } = ensureCrypto();
 
         const baseKey = await subtle.importKey(
             "raw",
-            encoder.encode(password),
+            encoder.encode(secret),
             { name: "PBKDF2" },
             false,
             ["deriveKey"]
@@ -168,8 +156,8 @@ window.VaultCrypto = (() => {
         return decoder.decode(decrypted);
     }
 
-    async function wrapVaultKey(password, vaultKey, saltBase64, iterations = 210000) {
-        const wrappingKey = await deriveWrappingKey(password, saltBase64, iterations);
+    async function wrapVaultKeyWithSecret(secret, vaultKey, saltBase64, iterations = 210000) {
+        const wrappingKey = await deriveWrappingKey(secret, saltBase64, iterations);
         const rawVaultKey = await exportVaultKeyRaw(vaultKey);
         const ivBytes = randomBytes(12);
         const { subtle } = ensureCrypto();
@@ -186,8 +174,8 @@ window.VaultCrypto = (() => {
         };
     }
 
-    async function unwrapVaultKey(password, wrappedVaultKeyBase64, wrappedVaultKeyIvBase64, saltBase64, iterations = 210000) {
-        const wrappingKey = await deriveWrappingKey(password, saltBase64, iterations);
+    async function unwrapVaultKeyWithSecret(secret, wrappedVaultKeyBase64, wrappedVaultKeyIvBase64, saltBase64, iterations = 210000) {
+        const wrappingKey = await deriveWrappingKey(secret, saltBase64, iterations);
         const { subtle } = ensureCrypto();
 
         const rawVaultKey = await subtle.decrypt(
@@ -202,24 +190,37 @@ window.VaultCrypto = (() => {
         return importVaultKeyRaw(rawVaultKey);
     }
 
-    async function createVaultProfile(password, iterations = 210000) {
+    async function createVaultProfile(password, recoveryKey, iterations = 210000) {
         const salt = randomBytesBase64(16);
         const vaultKey = await generateVaultKey();
-        const wrapped = await wrapVaultKey(password, vaultKey, salt, iterations);
+
+        const wrappedPassword = await wrapVaultKeyWithSecret(password, vaultKey, salt, iterations);
+        const wrappedRecovery = await wrapVaultKeyWithSecret(recoveryKey, vaultKey, salt, iterations);
         const check = await encryptText(vaultKey, "vault-check");
 
         return {
             salt,
             iterations,
-            wrapped_vault_key: wrapped.wrapped_vault_key,
-            wrapped_vault_key_iv: wrapped.wrapped_vault_key_iv,
+            wrapped_vault_key: wrappedPassword.wrapped_vault_key,
+            wrapped_vault_key_iv: wrappedPassword.wrapped_vault_key_iv,
+            wrapped_vault_key_recovery: wrappedRecovery.wrapped_vault_key,
+            wrapped_vault_key_recovery_iv: wrappedRecovery.wrapped_vault_key_iv,
             vault_key_check: JSON.stringify(check),
             vaultKey
         };
     }
 
+    async function assertVaultCheck(vaultKey, profile) {
+        const checkPayload = JSON.parse(profile.vault_key_check);
+        const plain = await decryptText(vaultKey, checkPayload.iv, checkPayload.encrypted_data);
+
+        if (plain !== "vault-check") {
+            throw new Error("Vault key check failed.");
+        }
+    }
+
     async function unlockVaultFromProfile(password, profile) {
-        const vaultKey = await unwrapVaultKey(
+        const vaultKey = await unwrapVaultKeyWithSecret(
             password,
             profile.wrapped_vault_key,
             profile.wrapped_vault_key_iv,
@@ -227,19 +228,27 @@ window.VaultCrypto = (() => {
             Number(profile.vault_iterations)
         );
 
-        const checkPayload = JSON.parse(profile.vault_key_check);
-        const plain = await decryptText(vaultKey, checkPayload.iv, checkPayload.encrypted_data);
+        await assertVaultCheck(vaultKey, profile);
+        return vaultKey;
+    }
 
-        if (plain !== "vault-check") {
-            throw new Error("Vault key check failed.");
-        }
+    async function unlockVaultFromRecoveryKey(recoveryKey, profile) {
+        const vaultKey = await unwrapVaultKeyWithSecret(
+            recoveryKey,
+            profile.wrapped_vault_key_recovery,
+            profile.wrapped_vault_key_recovery_iv,
+            profile.vault_salt,
+            Number(profile.vault_iterations)
+        );
 
+        await assertVaultCheck(vaultKey, profile);
         return vaultKey;
     }
 
     async function rewrapVaultKey(oldPassword, newPassword, profile) {
         const vaultKey = await unlockVaultFromProfile(oldPassword, profile);
-        const wrapped = await wrapVaultKey(
+
+        const wrapped = await wrapVaultKeyWithSecret(
             newPassword,
             vaultKey,
             profile.vault_salt,
@@ -252,11 +261,46 @@ window.VaultCrypto = (() => {
         };
     }
 
+    async function rewrapVaultKeyWithRecovery(oldRecoveryKey, newRecoveryKey, profile) {
+        const vaultKey = await unlockVaultFromRecoveryKey(oldRecoveryKey, profile);
+
+        const wrapped = await wrapVaultKeyWithSecret(
+            newRecoveryKey,
+            vaultKey,
+            profile.vault_salt,
+            Number(profile.vault_iterations)
+        );
+
+        return {
+            wrapped_vault_key_recovery: wrapped.wrapped_vault_key,
+            wrapped_vault_key_recovery_iv: wrapped.wrapped_vault_key_iv
+        };
+    }
+
+    async function rewrapVaultFromRecoveryToPassword(recoveryKey, newPassword, profile) {
+        const vaultKey = await unlockVaultFromRecoveryKey(recoveryKey, profile);
+
+        const wrappedPassword = await wrapVaultKeyWithSecret(
+            newPassword,
+            vaultKey,
+            profile.vault_salt,
+            Number(profile.vault_iterations)
+        );
+
+        return {
+            wrapped_vault_key: wrappedPassword.wrapped_vault_key,
+            wrapped_vault_key_iv: wrappedPassword.wrapped_vault_key_iv
+        };
+    }
+
     return {
         createVaultProfile,
         unlockVaultFromProfile,
+        unlockVaultFromRecoveryKey,
         encryptText,
         decryptText,
-        rewrapVaultKey
+        rewrapVaultKey,
+        rewrapVaultKeyWithRecovery,
+        rewrapVaultFromRecoveryToPassword
     };
 })();
