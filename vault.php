@@ -362,7 +362,7 @@ $username = $_SESSION["user_username"] ?? "user";
         </div>
     </div>
 
-    <script src="vault_crypto.js?v=100"></script>
-    <script src="vault_page.js?v=100"></script>
+    <script src="vault_crypto.js?v=300"></script>
+    <script src="vault_page.js?v=300"></script>
 </body>
 </html>
