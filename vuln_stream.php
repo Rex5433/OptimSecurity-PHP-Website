@@ -76,6 +76,7 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
             FROM public.login_activity
             WHERE user_id = ?
               AND created_at BETWEEN ? AND ?
+              AND LOWER(TRIM(COALESCE(event_type, ''))) = 'successful_login'
         ");
         $stmt->execute([$userId, $dayStart, $dayEnd]);
 
@@ -88,17 +89,18 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
     }
 
     $latestStmt = $pdo->prepare("
-        SELECT event_type
+        SELECT created_at
         FROM public.login_activity
         WHERE user_id = ?
+          AND LOWER(TRIM(COALESCE(event_type, ''))) = 'successful_login'
         ORDER BY created_at DESC
         LIMIT 1
     ");
     $latestStmt->execute([$userId]);
 
-    $latestEventType = $latestStmt->fetchColumn();
-    if ($latestEventType !== false && trim((string) $latestEventType) !== "") {
-        $latestType = formatAttackType((string) $latestEventType);
+    $latestCreatedAt = $latestStmt->fetchColumn();
+    if ($latestCreatedAt !== false) {
+        $latestType = "Successful Login";
     }
 
     $todayCount = end($series);
@@ -314,7 +316,7 @@ if ($pdo instanceof PDO && $userId > 0) {
 } else {
     $attackMetrics = [
         "series" => [0, 0, 0, 0, 0, 0, 0],
-        "labels" => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "labels" => ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"],
         "dates" => ["", "", "", "", "", "", ""],
         "currentCount" => 0,
         "weekCount" => 0,
