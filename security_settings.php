@@ -657,7 +657,7 @@ if ($activeTwofaSecret !== '') {
         </main>
     </div>
 
-    <script src="vault_crypto.js"></script>
+    <script src="vault_crypto.js?v=300"></script>
     <script>
         (() => {
             const form = document.getElementById("changePasswordForm");
