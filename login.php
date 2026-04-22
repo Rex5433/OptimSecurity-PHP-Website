@@ -16,11 +16,6 @@ require_once __DIR__ . "/attack_helpers.php";
 
 $message = "";
 
-/*
-|--------------------------------------------------------------------------
-| Clear stale pending 2FA session values on fresh login page load
-|--------------------------------------------------------------------------
-*/
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     unset(
         $_SESSION["pending_2fa_user_id"],
@@ -32,22 +27,17 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
 
 function getClientIpAddress(): string
 {
-    $keys = [
-        "HTTP_CF_CONNECTING_IP",
-        "HTTP_X_FORWARDED_FOR",
-        "HTTP_X_REAL_IP",
-        "REMOTE_ADDR"
-    ];
+    $keys = ["HTTP_CF_CONNECTING_IP", "HTTP_X_FORWARDED_FOR", "HTTP_X_REAL_IP", "REMOTE_ADDR"];
 
     foreach ($keys as $key) {
-        $value = $_SERVER[$key] ?? "";
+        $value = trim((string) ($_SERVER[$key] ?? ""));
         if ($value === "") {
             continue;
         }
 
         if ($key === "HTTP_X_FORWARDED_FOR") {
             $parts = explode(",", $value);
-            $value = trim($parts[0] ?? "");
+            $value = trim((string) ($parts[0] ?? ""));
         }
 
         if ($value !== "") {
@@ -134,7 +124,7 @@ function fetchIpLocationData(string $ip): array
     ];
 }
 
-function insertLoginActivity(PDO $pdo, ?int $userId, string $eventType, string $username = "", string $reason = ""): void
+function insertLoginActivity(PDO $pdo, ?int $userId, string $eventType): void
 {
     try {
         $ipAddress = getClientIpAddress();
@@ -143,9 +133,9 @@ function insertLoginActivity(PDO $pdo, ?int $userId, string $eventType, string $
 
         $stmt = $pdo->prepare("
             INSERT INTO public.login_activity
-                (user_id, created_at, event_type, ip_address, location, city, region, country, user_agent)
+            (user_id, created_at, event_type, ip_address, location, city, region, country, user_agent)
             VALUES
-                (:user_id, NOW(), :event_type, :ip_address, :location, :city, :region, :country, :user_agent)
+            (:user_id, NOW(), :event_type, :ip_address, :location, :city, :region, :country, :user_agent)
         ");
 
         $stmt->execute([
@@ -159,7 +149,7 @@ function insertLoginActivity(PDO $pdo, ?int $userId, string $eventType, string $
             "user_agent" => $userAgent
         ]);
     } catch (Throwable $e) {
-        // Fail silently so login itself is not broken by activity logging
+        error_log("login_activity insert failed: " . $e->getMessage());
     }
 }
 
@@ -189,12 +179,7 @@ function finalizeLogin(array $user_row, PDO $pdo): void
         ]
     );
 
-    insertLoginActivity(
-        $pdo,
-        (int) $user_row["id"],
-        "successful_login",
-        (string) ($user_row["username"] ?? "")
-    );
+    insertLoginActivity($pdo, (int) $user_row["id"], "successful_login");
 
     $displayName = trim((string) ($user_row["name"] ?? ""));
     if ($displayName === "") {
@@ -239,7 +224,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         );
 
         if ($pdo instanceof PDO) {
-            insertLoginActivity($pdo, null, "failed_login_form_error", $username, "Missing login fields");
+            insertLoginActivity($pdo, null, "failed_login_form_error");
         }
     } elseif (!$pdo) {
         $message = "Database connection failed.";
@@ -297,12 +282,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     ]
                 );
 
-                insertLoginActivity(
-                    $pdo,
-                    (int) $user_row["id"],
-                    "password_verified_2fa_pending",
-                    (string) ($user_row["username"] ?? "")
-                );
+                insertLoginActivity($pdo, (int) $user_row["id"], "password_verified_2fa_pending");
 
                 header("Location: verify_2fa.php");
                 exit;
@@ -327,7 +307,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $failedUserId = (int) $user_row["id"];
             }
 
-            insertLoginActivity($pdo, $failedUserId, "failed_login", $username, "Invalid username or password");
+            insertLoginActivity($pdo, $failedUserId, "failed_login");
         }
     }
 }
@@ -418,7 +398,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             try {
                 sessionStorage.setItem("vault_login_password", passwordInput.value || "");
             } catch (e) {
-                // Ignore storage issues silently
             }
         });
     }
