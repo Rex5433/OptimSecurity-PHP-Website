@@ -60,8 +60,6 @@ function finalizeLogin(array $user_row): void
     ]
 );
 
-die("successful_login was called for user_id=" . $user_row["id"]);
-
     $displayName = trim((string) ($user_row["name"] ?? ""));
     if ($displayName === "") {
         $displayName = (string) $user_row["username"];
