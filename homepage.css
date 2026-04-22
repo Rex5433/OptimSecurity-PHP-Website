@@ -856,50 +856,55 @@ body {
 
 .activity-summary-box {
     margin-top: 18px;
-    border: 1px solid #25475b;
-    border-radius: 16px;
-    background: #0b2230;
-    padding: 18px;
+    background: rgba(2, 37, 60, 0.9);
+    border: 1px solid rgba(60, 126, 160, 0.35);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 
 .activity-summary-top {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 16px;
-    margin-bottom: 18px;
+    gap: 18px;
+    margin-bottom: 16px;
 }
 
 .activity-summary-title {
-    font-size: 1rem;
-    font-weight: 600;
+    font-size: 0.95rem;
+    font-weight: 800;
     color: #ffffff;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 
 .activity-summary-date {
-    margin-top: 4px;
-    font-size: 0.9rem;
-    color: #9bb3c0;
+    margin-top: 6px;
+    font-size: 0.92rem;
+    color: rgba(220, 228, 235, 0.78);
 }
 
 .activity-summary-total {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 4px;
+    gap: 6px;
+    min-width: 90px;
 }
 
 .activity-summary-total-label {
-    font-size: 0.8rem;
-    color: #8ca8b7;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: rgba(220, 228, 235, 0.72);
     text-transform: uppercase;
     letter-spacing: 0.08em;
 }
 
 .activity-summary-total-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #27e9b5;
+    font-size: 2rem;
+    font-weight: 800;
+    color: #2de7bb;
     line-height: 1;
 }
 
@@ -910,32 +915,38 @@ body {
 }
 
 .activity-summary-item {
-    border: 1px solid #1f4255;
+    background: #082232;
+    border: 1px solid rgba(60, 126, 160, 0.35);
     border-radius: 12px;
-    background: #0d2534;
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    padding: 14px 16px;
+    min-width: 0;
 }
 
 .activity-summary-label {
-    font-size: 0.78rem;
-    color: #8ca8b7;
+    display: block;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: rgba(220, 228, 235, 0.68);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
 }
 
 .activity-summary-item strong {
-    font-size: 0.95rem;
+    display: block;
+    font-size: 1rem;
+    font-weight: 700;
     color: #ffffff;
+    line-height: 1.35;
     word-break: break-word;
 }
 
 .activity-summary-note {
     margin-top: 14px;
     font-size: 0.88rem;
-    color: #9bb3c0;
+    color: #8fb3c7;
+    line-height: 1.4;
+    padding-left: 2px;
 }
 
 .sidebar-toggle-input {
