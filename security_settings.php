@@ -223,7 +223,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 $message = $errorText;
             } elseif (strlen($newPassword) < 8) {
-                $errorText = "New password must be at least 8 characters.";
+                $errorText = "New password must be at least 8 characters long.";
+
+                if ($isAjax) {
+                    json_response(["ok" => false, "error" => $errorText], 400);
+                }
+
+                $message = $errorText;
+            } elseif (
+                !preg_match('/[A-Z]/', $newPassword) ||
+                !preg_match('/[a-z]/', $newPassword) ||
+                !preg_match('/[0-9]/', $newPassword) ||
+                !preg_match('/[\W_]/', $newPassword)
+            ) {
+                $errorText = "New password must contain an uppercase letter, lowercase letter, number, and special character.";
 
                 if ($isAjax) {
                     json_response(["ok" => false, "error" => $errorText], 400);
@@ -619,6 +632,13 @@ if ($activeTwofaSecret !== '') {
                                 <input type="password" id="confirm_password" name="confirm_password" required>
                             </div>
 
+                            <div class="options-row create-account-options">
+                                <label class="checkbox-container">
+                                    <input type="checkbox" id="show_change_passwords" onclick="toggleChangePasswords()">
+                                    <span>Show Passwords</span>
+                                </label>
+                            </div>
+
                             <div class="vault-actions-row" style="justify-content:flex-start;">
                                 <button type="submit" class="vault-primary-btn" id="updatePasswordBtn">Update Password</button>
                             </div>
@@ -657,7 +677,7 @@ if ($activeTwofaSecret !== '') {
         </main>
     </div>
 
-    <script src="vault_crypto.js?v=300"></script>
+    <script src="vault_crypto.js"></script>
     <script>
         (() => {
             const form = document.getElementById("changePasswordForm");
@@ -702,6 +722,22 @@ if ($activeTwofaSecret !== '') {
                 }
             });
         })();
+
+        function toggleChangePasswords() {
+            const currentPassword = document.getElementById("current_password");
+            const newPassword = document.getElementById("new_password");
+            const confirmPassword = document.getElementById("confirm_password");
+            const checkbox = document.getElementById("show_change_passwords");
+
+            if (!currentPassword || !newPassword || !confirmPassword || !checkbox) {
+                return;
+            }
+
+            const newType = checkbox.checked ? "text" : "password";
+            currentPassword.type = newType;
+            newPassword.type = newType;
+            confirmPassword.type = newType;
+        }
     </script>
 </body>
 </html>

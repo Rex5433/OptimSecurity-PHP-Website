@@ -591,6 +591,41 @@ body.vault-body {
     flex-wrap: wrap;
 }
 
+.options-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin: 2px 0 18px;
+}
+
+.create-account-options {
+    justify-content: flex-start;
+}
+
+.checkbox-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #9bb3c3;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox-container input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: #27e9b5;
+    cursor: pointer;
+}
+
+.checkbox-container span {
+    line-height: 1;
+}
+
 @media (max-width: 1250px) {
     .vault-workspace {
         grid-template-columns: 1fr;
@@ -673,6 +708,11 @@ body.vault-body {
     .vault-primary-btn,
     .vault-secondary-btn {
         width: 100%;
+    }
+
+    .options-row {
+    flex-direction: column;
+    align-items: flex-start;
     }
 }
 
