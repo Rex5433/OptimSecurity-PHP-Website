@@ -23,13 +23,14 @@ $username = (string) $_SESSION["password_reset_username"];
 $message = "";
 $success = "";
 $newRecoveryKeyToShow = "";
-$vaultWasReset = false;
+$vaultPreserved = false;
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $recoveryKeyInput = trim($_POST["recovery_key"] ?? "");
     $newPassword = $_POST["new_password"] ?? "";
     $confirmPassword = $_POST["confirm_password"] ?? "";
 
-    if ($newPassword === "" || $confirmPassword === "") {
+    if ($recoveryKeyInput === "" || $newPassword === "" || $confirmPassword === "") {
         $message = "Please fill in all fields.";
     } elseif (strlen($newPassword) < 8) {
         $message = "Password must be at least 8 characters.";
@@ -44,70 +45,81 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $message = "Passwords do not match.";
     } else {
         try {
-            $pdo->beginTransaction();
+            $row = getRecoveryRowByUsername($pdo, $username);
 
-            $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+            if (!$row || !verifyRecoveryKey($recoveryKeyInput, (string) $row["recovery_key_hash"])) {
+                $message = "Invalid recovery key.";
+            } else {
+                $pdo->beginTransaction();
 
-            $updateStmt = $pdo->prepare('
-                UPDATE "Accounts"
-                SET password = :password
-                WHERE id = :id
-            ');
-            $updateStmt->execute([
-                'password' => $newHash,
-                'id' => $userId
-            ]);
+                $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
 
-            $checkVaultProfileStmt = $pdo->prepare('
-                SELECT 1
-                FROM public.vault_profile
-                WHERE user_id = :user_id
-                LIMIT 1
-            ');
-            $checkVaultProfileStmt->execute([
-                'user_id' => $userId
-            ]);
-            $vaultExists = (bool) $checkVaultProfileStmt->fetchColumn();
-
-            if ($vaultExists) {
-                $deleteVaultItemsStmt = $pdo->prepare('
-                    DELETE FROM public.vault_item
-                    WHERE user_id = :user_id
+                $updateStmt = $pdo->prepare('
+                    UPDATE "Accounts"
+                    SET password = :password
+                    WHERE id = :id
                 ');
-                $deleteVaultItemsStmt->execute([
-                    'user_id' => $userId
+                $updateStmt->execute([
+                    'password' => $newHash,
+                    'id' => $userId
                 ]);
 
-                $deleteVaultProfileStmt = $pdo->prepare('
-                    DELETE FROM public.vault_profile
+                $vaultProfileStmt = $pdo->prepare('
+                    SELECT
+                        user_id,
+                        vault_salt,
+                        vault_iterations,
+                        vault_key_check,
+                        wrapped_vault_key,
+                        wrapped_vault_key_iv,
+                        wrapped_vault_key_recovery,
+                        wrapped_vault_key_recovery_iv
+                    FROM public.vault_profile
                     WHERE user_id = :user_id
+                    LIMIT 1
                 ');
-                $deleteVaultProfileStmt->execute([
+                $vaultProfileStmt->execute([
                     'user_id' => $userId
                 ]);
+                $vaultProfile = $vaultProfileStmt->fetch(PDO::FETCH_ASSOC);
 
-                $vaultWasReset = true;
+                if ($vaultProfile) {
+                    $vaultPreserved = true;
+                }
+
+                markRecoveryKeyUsed($pdo, $userId);
+
+                $newRecoveryKey = generateRecoveryKey();
+                $saved = upsertRecoveryKey($pdo, $userId, $newRecoveryKey);
+
+                if (!$saved) {
+                    throw new Exception("Could not rotate recovery key.");
+                }
+
+                if ($vaultProfile) {
+                    $stmt = $pdo->prepare('
+                        UPDATE public.vault_profile
+                        SET updated_at = NOW()
+                        WHERE user_id = :user_id
+                    ');
+                    $stmt->execute([
+                        'user_id' => $userId
+                    ]);
+                }
+
+                $pdo->commit();
+
+                $_SESSION["password_reset_recovery_key"] = $recoveryKeyInput;
+                $_SESSION["password_reset_new_password"] = $newPassword;
+                $_SESSION["password_reset_new_recovery_key"] = $newRecoveryKey;
+                $_SESSION["password_reset_username_done"] = $username;
+                $_SESSION["password_reset_vault_preserved"] = $vaultPreserved ? "1" : "0";
+
+                unset($_SESSION["password_reset_user_id"], $_SESSION["password_reset_username"]);
+
+                header("Location: reset_password_finalize.php");
+                exit;
             }
-
-            markRecoveryKeyUsed($pdo, $userId);
-
-            $newRecoveryKey = generateRecoveryKey();
-            $saved = upsertRecoveryKey($pdo, $userId, $newRecoveryKey);
-
-            if (!$saved) {
-                throw new Exception("Could not rotate recovery key.");
-            }
-
-            $pdo->commit();
-
-            $newRecoveryKeyToShow = $newRecoveryKey;
-            $success = "Password reset successful. Save your new recovery key now.";
-
-            $_SESSION["vault_password_reset_notice"] = $vaultWasReset
-                ? "Your vault was reset during password recovery because the previous encrypted vault key could not be safely rewrapped without your old password."
-                : "";
-
-            unset($_SESSION["password_reset_user_id"], $_SESSION["password_reset_username"]);
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -130,37 +142,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="manifest" href="/site.webmanifest">
-    <style>
-        .recovery-key-box {
-            margin-top: 16px;
-            padding: 16px;
-            border-radius: 14px;
-            border: 1px solid rgba(39, 233, 181, 0.28);
-            background: rgba(39, 233, 181, 0.08);
-            color: #d9fff4;
-            text-align: center;
-            font-weight: 800;
-            letter-spacing: 1px;
-            word-break: break-word;
-        }
-
-        .recovery-note {
-            margin-top: 12px;
-            color: #b9d2dd;
-            text-align: center;
-            line-height: 1.5;
-        }
-
-        .vault-warning {
-            margin-top: 16px;
-            padding: 14px 16px;
-            border-radius: 14px;
-            border: 1px solid rgba(255, 170, 80, 0.35);
-            background: rgba(255, 170, 80, 0.10);
-            color: #ffe2bf;
-            line-height: 1.5;
-        }
-    </style>
 </head>
 <body>
     <div class="login-wrapper">
@@ -175,64 +156,48 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 <div class="login-error"><?= htmlspecialchars($message) ?></div>
             <?php endif; ?>
 
-            <?php if ($success): ?>
-                <div class="login-success"><?= htmlspecialchars($success) ?></div>
-            <?php endif; ?>
-
-            <?php if ($newRecoveryKeyToShow !== ""): ?>
-                <?php if ($vaultWasReset): ?>
-                    <div class="vault-warning">
-                        Your encrypted vault was reset during recovery. Since this password reset did not use your old password,
-                        the previous vault key could not be safely rewrapped.
-                    </div>
-                <?php endif; ?>
-
-                <div class="recovery-key-box">
-                    <?= htmlspecialchars($newRecoveryKeyToShow) ?>
+            <form method="post">
+                <div class="form-group">
+                    <label for="recovery_key">Recovery Key</label>
+                    <input
+                        type="text"
+                        id="recovery_key"
+                        name="recovery_key"
+                        placeholder="Enter your recovery key"
+                        required
+                    >
                 </div>
 
-                <div class="recovery-note">
-                    This new recovery key is shown only once. Save it somewhere secure before leaving this page.
+                <div class="form-group">
+                    <label for="new_password">New Password</label>
+                    <input
+                        type="password"
+                        id="new_password"
+                        name="new_password"
+                        placeholder="Enter new password"
+                        required
+                    >
                 </div>
 
-                <div class="divider"></div>
+                <div class="form-group">
+                    <label for="confirm_password">Confirm New Password</label>
+                    <input
+                        type="password"
+                        id="confirm_password"
+                        name="confirm_password"
+                        placeholder="Confirm new password"
+                        required
+                    >
+                </div>
 
-                <p class="bottom-link">
-                    <a href="login.php">Back to Login</a>
-                </p>
-            <?php else: ?>
-                <form method="post">
-                    <div class="form-group">
-                        <label for="new_password">New Password</label>
-                        <input
-                            type="password"
-                            id="new_password"
-                            name="new_password"
-                            placeholder="Enter new password"
-                            required
-                        >
-                    </div>
+                <button type="submit" class="login-submit">Update Password</button>
+            </form>
 
-                    <div class="form-group">
-                        <label for="confirm_password">Confirm New Password</label>
-                        <input
-                            type="password"
-                            id="confirm_password"
-                            name="confirm_password"
-                            placeholder="Confirm new password"
-                            required
-                        >
-                    </div>
+            <div class="divider"></div>
 
-                    <button type="submit" class="login-submit">Update Password</button>
-                </form>
-
-                <div class="divider"></div>
-
-                <p class="bottom-link">
-                    <a href="login.php">Back to Login</a>
-                </p>
-            <?php endif; ?>
+            <p class="bottom-link">
+                <a href="login.php">Back to Login</a>
+            </p>
         </div>
     </div>
 </body>
