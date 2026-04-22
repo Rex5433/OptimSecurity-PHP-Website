@@ -24,10 +24,20 @@ $feedError = "";
 $feedOnline = false;
 $advisoryOnline = false;
 
+$selectedDay = trim((string)($_GET["activity_day"] ?? ""));
+$tipQuery = trim((string)($_GET["tips_q"] ?? ""));
+$shuffleTips = isset($_GET["shuffle_tips"]);
+
 function safeText($value, $default = "N/A")
 {
-    $value = trim((string) ($value ?? ""));
+    $value = trim((string)($value ?? ""));
     return $value !== "" ? htmlspecialchars($value) : $default;
+}
+
+function safeRawText($value, $default = "N/A")
+{
+    $value = trim((string)($value ?? ""));
+    return $value !== "" ? $value : $default;
 }
 
 function getThreatScore($count)
@@ -46,7 +56,7 @@ function getThreatScore($count)
 
 function getActionLabel($requiredAction)
 {
-    $action = strtolower((string) $requiredAction);
+    $action = strtolower((string)$requiredAction);
 
     if (str_contains($action, "patch") || str_contains($action, "update")) {
         return "Patch Available";
@@ -126,6 +136,27 @@ function getLoginActivityColumnMap(PDO $pdo): array
     ];
 }
 
+function buildLocationString(array $row, array $map): string
+{
+    $parts = [];
+
+    if ($map["location"] !== null && !empty($row[$map["location"]])) {
+        return trim((string)$row[$map["location"]]);
+    }
+
+    foreach (["city", "region", "country"] as $partKey) {
+        $col = $map[$partKey] ?? null;
+        if ($col !== null) {
+            $value = trim((string)($row[$col] ?? ""));
+            if ($value !== "") {
+                $parts[] = $value;
+            }
+        }
+    }
+
+    return !empty($parts) ? implode(", ", $parts) : "Unknown";
+}
+
 function buildAttackMetrics(PDO $pdo): array
 {
     $map = getLoginActivityColumnMap($pdo);
@@ -181,7 +212,7 @@ function buildAttackMetrics(PDO $pdo): array
         }
 
         $stmt->execute($params);
-        $count = (int) $stmt->fetchColumn();
+        $count = (int)$stmt->fetchColumn();
 
         $series[] = $count;
         $labels[] = date("D", $dayTs);
@@ -200,9 +231,92 @@ function buildAttackMetrics(PDO $pdo): array
         "labels" => $labels,
         "dates" => $dates,
         "isoDates" => $isoDates,
-        "currentCount" => (int) $todayCount,
+        "currentCount" => (int)$todayCount,
         "weekCount" => $weekCount,
         "latestType" => "Successful Login"
+    ];
+}
+
+function getActivityDayDetails(PDO $pdo, string $day): ?array
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $day)) {
+        return null;
+    }
+
+    $map = getLoginActivityColumnMap($pdo);
+    $timeCol = $map["timestamp"];
+
+    if ($timeCol === null) {
+        return [
+            "label" => date("D M j", strtotime($day)),
+            "total" => 0,
+            "rows" => []
+        ];
+    }
+
+    $selectParts = [];
+    $aliases = [
+        "timestamp" => "created_at",
+        "ip" => "ip",
+        "event_type" => "event_type",
+        "user_agent" => "user_agent"
+    ];
+
+    foreach ($aliases as $mapKey => $alias) {
+        $col = $map[$mapKey] ?? null;
+        if ($col !== null) {
+            $selectParts[] = quoteIdent($col) . " AS " . quoteIdent($alias);
+        }
+    }
+
+    foreach (["location", "city", "region", "country"] as $mapKey) {
+        $col = $map[$mapKey] ?? null;
+        if ($col !== null) {
+            $selectParts[] = quoteIdent($col) . " AS " . quoteIdent($mapKey);
+        }
+    }
+
+    if (empty($selectParts)) {
+        $selectParts[] = "NULL AS created_at";
+    }
+
+    $sql = "
+        SELECT " . implode(", ", $selectParts) . "
+        FROM public.login_activity
+        WHERE " . quoteIdent($timeCol) . " >= ?
+          AND " . quoteIdent($timeCol) . " < ?
+    ";
+
+    $params = [
+        $day . " 00:00:00",
+        date("Y-m-d 00:00:00", strtotime($day . " +1 day"))
+    ];
+
+    if ($map["user_id"] !== null && isset($_SESSION["user_id"])) {
+        $sql .= " AND " . quoteIdent($map["user_id"]) . " = ?";
+        $params[] = $_SESSION["user_id"];
+    }
+
+    $sql .= " ORDER BY " . quoteIdent($timeCol) . " DESC LIMIT 10";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    foreach ($rows as &$row) {
+        $row["location_display"] = buildLocationString($row, [
+            "location" => "location",
+            "city" => "city",
+            "region" => "region",
+            "country" => "country"
+        ]);
+    }
+    unset($row);
+
+    return [
+        "label" => date("D M j", strtotime($day)),
+        "total" => count($rows),
+        "rows" => $rows
     ];
 }
 
@@ -301,12 +415,44 @@ if (empty($newsItems)) {
 }
 
 $attackMetrics = buildAttackMetrics($pdo);
+$selectedDetails = $selectedDay !== "" ? getActivityDayDetails($pdo, $selectedDay) : null;
 
 $alertCount = count($recentVulns);
 $threatScore = getThreatScore($alertCount);
 $passwordHealth = "Strong";
 $feedStatusText = ($feedOnline || $advisoryOnline) ? "Live Feed Online" : "Feed Offline";
 $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-status-bar offline";
+$serverUpdatedLabel = "Updated: " . date("g:i A");
+
+$tipLibrary = [
+    "home" => [
+        "Enable MFA on all primary accounts.",
+        "Prioritize known exploited vulnerabilities first.",
+        "Review CISA alerts regularly for active threat guidance.",
+        "Use long, unique passwords for important services.",
+        "Keep browsers and operating systems fully updated.",
+        "Back up important files regularly.",
+        "Limit admin privileges wherever possible.",
+        "Watch for suspicious links and attachments."
+    ]
+];
+
+$currentTips = $tipLibrary["home"];
+
+if ($shuffleTips) {
+    shuffle($currentTips);
+}
+
+if ($tipQuery !== "") {
+    $currentTips = array_values(array_filter($currentTips, function ($tip) use ($tipQuery) {
+        return stripos($tip, $tipQuery) !== false;
+    }));
+} else {
+    $currentTips = array_slice($currentTips, 0, 3);
+}
+
+$maxValue = max($attackMetrics["series"]);
+$chartTop = max($maxValue + 1, 5);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -353,31 +499,38 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     </div>
 
                     <div class="card-actions">
-                        <div class="<?= $liveStatusClass ?>" id="liveStatusBar">
+                        <div class="<?= htmlspecialchars($liveStatusClass) ?>">
                             <span class="live-status-left">
                                 <span class="status-dot"></span>
-                                <span id="feedStatusText"><?= htmlspecialchars($feedStatusText) ?></span>
+                                <span><?= htmlspecialchars($feedStatusText) ?></span>
                             </span>
 
                             <span class="live-status-divider"></span>
 
-                            <span class="live-status-right" id="liveUpdateLabel">Waiting for refresh...</span>
+                            <span class="live-status-right"><?= htmlspecialchars($serverUpdatedLabel) ?></span>
                         </div>
 
-                        <button class="refresh-btn" id="manualRefreshBtn" type="button">Refresh Feed</button>
+                        <a class="refresh-btn" href="homepage.php">Refresh Feed</a>
                     </div>
 
-                    <div class="feed-warning<?= trim($feedError) === '' ? ' hidden-warning' : '' ?>" id="feedWarning">
+                    <div class="feed-warning<?= trim($feedError) === '' ? ' hidden-warning' : '' ?>">
                         <?= htmlspecialchars(trim($feedError)) ?>
                     </div>
 
-                    <div class="news-list" id="newsList">
+                    <div class="news-list">
                         <?php foreach ($newsItems as $item): ?>
-                            <a class="news-item live-news news-link-card" href="<?= htmlspecialchars($item["link"]) ?>"
-                                target="_blank" rel="noopener noreferrer">
+                            <a class="news-item live-news news-link-card"
+                               href="<?= htmlspecialchars($item["link"]) ?>"
+                               target="_blank"
+                               rel="noopener noreferrer">
                                 <div class="news-head"><?= safeText($item["title"]) ?></div>
                                 <div class="news-sub"><?= safeText($item["summary"]) ?></div>
-                                <div class="news-meta"><?= safeText($item["meta"]) ?></div>
+                                <div class="news-meta">
+                                    <?= safeText($item["meta"]) ?>
+                                    <?php if (!empty($item["date"])): ?>
+                                        • <?= safeText($item["date"]) ?>
+                                    <?php endif; ?>
+                                </div>
                             </a>
                         <?php endforeach; ?>
                     </div>
@@ -394,33 +547,97 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                             <span>Click a bar for details</span>
                         </div>
 
-                        <div class="attack-week-chart" id="attackWeekChart"></div>
+                        <div class="attack-week-chart nojs-chart" style="--chart-top: <?= (int)$chartTop ?>;">
+                            <?php foreach ($attackMetrics["series"] as $index => $value): ?>
+                                <?php
+                                $label = $attackMetrics["labels"][$index] ?? "";
+                                $dateText = $attackMetrics["dates"][$index] ?? "";
+                                $isoDate = $attackMetrics["isoDates"][$index] ?? "";
+                                $percent = $value > 0 ? ($value / $chartTop) * 100 : 0;
+                                $isActive = ($selectedDay !== "" && $selectedDay === $isoDate) || ($selectedDay === "" && $index === count($attackMetrics["series"]) - 1);
+                                ?>
+                                <a
+                                    class="attack-week-col<?= $isActive ? ' active-day' : '' ?>"
+                                    href="homepage.php?activity_day=<?= urlencode($isoDate) ?>#activity-details"
+                                    aria-label="<?= htmlspecialchars($label . ' ' . $dateText . ': ' . $value . ' events') ?>"
+                                >
+                                    <div class="attack-week-plot">
+                                        <div class="attack-week-bar<?= $value === 0 ? ' zero-bar' : '' ?>" style="height: <?= htmlspecialchars((string)$percent) ?>%;"></div>
+                                    </div>
+                                    <div class="attack-week-value"><?= (int)$value ?></div>
+                                    <div class="attack-week-day"><?= htmlspecialchars($label) ?></div>
+                                    <div class="attack-week-date"><?= htmlspecialchars($dateText) ?></div>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
                     </div>
 
                     <div class="attack-live-stats">
                         <div class="attack-mini-card">
                             <span class="attack-mini-label">Today</span>
-                            <span class="attack-mini-value" id="attackCurrentCount"><?= (int) $attackMetrics["currentCount"] ?></span>
+                            <span class="attack-mini-value"><?= (int)$attackMetrics["currentCount"] ?></span>
                         </div>
 
                         <div class="attack-mini-card">
                             <span class="attack-mini-label">This Week</span>
-                            <span class="attack-mini-value" id="attackWeekCount"><?= (int) $attackMetrics["weekCount"] ?></span>
+                            <span class="attack-mini-value"><?= (int)$attackMetrics["weekCount"] ?></span>
                         </div>
                     </div>
 
-                    <div class="activity-footer-strip" id="activityFooterStrip">
+                    <div class="activity-footer-strip" id="activity-details">
                         <div class="activity-footer-left">
                             <div class="activity-footer-icon">✓</div>
                             <div class="activity-footer-copy">
                                 <div class="activity-footer-title">Latest: Successful Login</div>
-                                <div class="activity-footer-meta" id="activityFooterMeta">Click a bar to load details.</div>
+                                <div class="activity-footer-meta">
+                                    <?php if ($selectedDetails && !empty($selectedDetails["rows"])): ?>
+                                        <?= htmlspecialchars($selectedDetails["label"]) ?> • <?= (int)$selectedDetails["total"] ?> event(s) found
+                                    <?php else: ?>
+                                        Click a bar to load details.
+                                    <?php endif; ?>
+                                </div>
                             </div>
                         </div>
 
-                        <button type="button" class="activity-footer-btn" id="activityFooterBtn">
-                            View Details
-                        </button>
+                        <a class="activity-footer-btn" href="#activity-day-panel">View Details</a>
+                    </div>
+
+                    <div class="dash-table-like activity-day-panel" id="activity-day-panel">
+                        <?php if ($selectedDetails && !empty($selectedDetails["rows"])): ?>
+                            <?php foreach ($selectedDetails["rows"] as $row): ?>
+                                <div class="dash-row no-cve-row">
+                                    <span class="row-dot"></span>
+
+                                    <div class="row-main vuln-main">
+                                        <div class="vuln-title">
+                                            <?= htmlspecialchars(safeRawText($row["event_type"] ?? "Login Activity")) ?>
+                                        </div>
+                                        <div class="vuln-summary">
+                                            IP: <?= htmlspecialchars(safeRawText($row["ip"] ?? "N/A")) ?>
+                                            • Location: <?= htmlspecialchars(safeRawText($row["location_display"] ?? "Unknown")) ?>
+                                        </div>
+                                        <div class="vuln-meta">
+                                            Time: <?= htmlspecialchars(safeRawText($row["created_at"] ?? "N/A")) ?>
+                                        </div>
+                                        <div class="vuln-meta">
+                                            Device: <?= htmlspecialchars(safeRawText($row["user_agent"] ?? "N/A")) ?>
+                                        </div>
+                                    </div>
+
+                                    <div class="row-side vuln-status-wrap">
+                                        <span class="severity-pill sev-default">Activity</span>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php elseif ($selectedDay !== ""): ?>
+                            <div class="dash-row no-cve-row">
+                                <span class="row-dot"></span>
+                                <div class="row-main vuln-main">
+                                    <div class="vuln-title">No details found</div>
+                                    <div class="vuln-summary">There were no matching activity rows for this selected day.</div>
+                                </div>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </section>
@@ -431,14 +648,14 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                         <h2>Recent Vulnerabilities</h2>
                     </div>
 
-                    <div class="dash-table-like" id="vulnList">
+                    <div class="dash-table-like">
                         <?php foreach ($recentVulns as $vuln): ?>
                             <?php
-                            $vendor = trim((string) ($vuln["vendorProject"] ?? ""));
-                            $product = trim((string) ($vuln["product"] ?? ""));
-                            $summary = trim((string) ($vuln["shortDescription"] ?? "No description available."));
+                            $vendor = trim((string)($vuln["vendorProject"] ?? ""));
+                            $product = trim((string)($vuln["product"] ?? ""));
+                            $summary = trim((string)($vuln["shortDescription"] ?? "No description available."));
                             $actionLabel = getActionLabel($vuln["requiredAction"] ?? "");
-                            $dateAdded = trim((string) ($vuln["dateAdded"] ?? ""));
+                            $dateAdded = trim((string)($vuln["dateAdded"] ?? ""));
 
                             $displayTitle = ($vendor !== "" && $product !== "")
                                 ? $vendor . " / " . $product
@@ -479,19 +696,27 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     </div>
 
                     <div class="quick-tips-bar">
-                        <div class="tips-search-wrapper">
-                            <input type="text" id="tipsSearch" class="tips-search-input"
-                                placeholder="Search tips like MFA, phishing, passwords...">
-                        </div>
+                        <form method="get" class="tips-search-wrapper" action="homepage.php">
+                            <input
+                                type="text"
+                                name="tips_q"
+                                class="tips-search-input"
+                                placeholder="Search tips like MFA, phishing, passwords..."
+                                value="<?= htmlspecialchars($tipQuery) ?>"
+                            >
+                        </form>
 
-                        <button type="button" class="refresh-btn" id="shuffleTipsBtn">
-                            New Tips
-                        </button>
+                        <a class="refresh-btn" href="homepage.php?shuffle_tips=1">New Tips</a>
                     </div>
 
-                    <div class="tips-list" id="tipsList"></div>
-                    <div class="empty-state hidden-warning" id="tipsEmptyState">
-                        No tips matched your search.
+                    <div class="tips-list">
+                        <?php if (!empty($currentTips)): ?>
+                            <?php foreach ($currentTips as $tip): ?>
+                                <div class="tip-box"><?= htmlspecialchars($tip) ?></div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="empty-state">No tips matched your search.</div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </section>
@@ -543,412 +768,5 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
             </section>
         </main>
     </div>
-
-    <script>
-        const newsList = document.getElementById("newsList");
-        const vulnList = document.getElementById("vulnList");
-        const liveStatusBar = document.getElementById("liveStatusBar");
-        const feedStatusText = document.getElementById("feedStatusText");
-        const feedWarning = document.getElementById("feedWarning");
-        const liveUpdateLabel = document.getElementById("liveUpdateLabel");
-        const manualRefreshBtn = document.getElementById("manualRefreshBtn");
-        const attackWeekChart = document.getElementById("attackWeekChart");
-        const attackCurrentCount = document.getElementById("attackCurrentCount");
-        const attackWeekCount = document.getElementById("attackWeekCount");
-        const activityFooterMeta = document.getElementById("activityFooterMeta");
-        const activityFooterBtn = document.getElementById("activityFooterBtn");
-
-        const tipsList = document.getElementById("tipsList");
-        const tipsSearch = document.getElementById("tipsSearch");
-        const shuffleTipsBtn = document.getElementById("shuffleTipsBtn");
-        const tipsEmptyState = document.getElementById("tipsEmptyState");
-
-        let selectedDayDetails = null;
-
-        function escapeHtml(text) {
-            const div = document.createElement("div");
-            div.textContent = text ?? "";
-            return div.innerHTML;
-        }
-
-        function renderNews(items) {
-            newsList.innerHTML = "";
-
-            items.forEach(item => {
-                const a = document.createElement("a");
-                a.className = "news-item live-news news-link-card";
-                a.href = item.link || "#";
-                a.target = "_blank";
-                a.rel = "noopener noreferrer";
-
-                const metaText = item.date
-                    ? `${escapeHtml(item.meta || "")} • ${escapeHtml(item.date)}`
-                    : `${escapeHtml(item.meta || "")}`;
-
-                a.innerHTML = `
-                    <div class="news-head">${escapeHtml(item.title || "Untitled Update")}</div>
-                    <div class="news-sub">${escapeHtml(item.summary || "")}</div>
-                    <div class="news-meta">${metaText}</div>
-                `;
-
-                newsList.appendChild(a);
-            });
-        }
-
-        function renderVulns(items) {
-            vulnList.innerHTML = "";
-
-            items.forEach(item => {
-                const row = document.createElement("div");
-                row.className = "dash-row no-cve-row";
-
-                const metaHtml = item.dateAdded
-                    ? `<div class="vuln-meta">Added: ${escapeHtml(item.dateAdded)}</div>`
-                    : "";
-
-                row.innerHTML = `
-                    <span class="row-dot"></span>
-                    <div class="row-main vuln-main">
-                        <div class="vuln-title">${escapeHtml(item.title || "Unnamed Vulnerability")}</div>
-                        <div class="vuln-summary">${escapeHtml(item.summary || "No description available.")}</div>
-                        ${metaHtml}
-                    </div>
-                    <div class="row-side vuln-status-wrap">
-                        <span class="severity-pill sev-default">Known Exploited</span>
-                    </div>
-                    <div class="row-side vuln-action-wrap">
-                        <span class="vuln-action">${escapeHtml(item.action || "Review")}</span>
-                    </div>
-                `;
-
-                vulnList.appendChild(row);
-            });
-        }
-
-        function renderFooterDetails(payload) {
-            const rows = Array.isArray(payload.rows) ? payload.rows : [];
-            const first = rows.length ? rows[0] : null;
-            const total = Number(payload.total || 0);
-
-            if (!first) {
-                selectedDayDetails = null;
-                activityFooterMeta.textContent = `${payload.label || "Selected Day"} • No details found`;
-                return;
-            }
-
-            selectedDayDetails = {
-                label: payload.label || "Selected Day",
-                total,
-                ip: first.ip || "N/A",
-                location: first.location || "Unknown",
-                eventType: first.event_type || "Login Activity",
-                time: first.created_at || "N/A",
-                userAgent: first.user_agent || "N/A"
-            };
-
-            activityFooterMeta.textContent =
-                `${selectedDayDetails.time} • ${selectedDayDetails.ip} • ${selectedDayDetails.location} • ${selectedDayDetails.eventType}`;
-        }
-
-        async function openActivityDay(dayIso, label) {
-            activityFooterMeta.textContent = `${label} • Loading details...`;
-
-            try {
-                const response = await fetch("login_activity_day.php?day=" + encodeURIComponent(dayIso) + "&ts=" + Date.now(), {
-                    cache: "no-store"
-                });
-
-                if (!response.ok) {
-                    throw new Error("Failed to load activity details");
-                }
-
-                const data = await response.json();
-                renderFooterDetails(data);
-            } catch (error) {
-                selectedDayDetails = null;
-                activityFooterMeta.textContent = `${label} • Could not load day details.`;
-            }
-        }
-
-        function renderAttackWeek(series, labels, dates, isoDates) {
-            const safeSeries = Array.isArray(series) && series.length > 0
-                ? series.map(value => Number(value) || 0)
-                : [0, 0, 0, 0, 0, 0, 0];
-
-            const safeLabels = Array.isArray(labels) && labels.length === safeSeries.length
-                ? labels
-                : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-            const safeDates = Array.isArray(dates) && dates.length === safeSeries.length
-                ? dates
-                : ["", "", "", "", "", "", ""];
-
-            const safeIsoDates = Array.isArray(isoDates) && isoDates.length === safeSeries.length
-                ? isoDates
-                : ["", "", "", "", "", "", ""];
-
-            const maxValue = Math.max(...safeSeries, 1);
-            const chartTop = Math.max(maxValue + 1, 5);
-
-            attackWeekChart.innerHTML = "";
-            attackWeekChart.style.setProperty("--chart-top", String(chartTop));
-
-            safeSeries.forEach((value, index) => {
-                const button = document.createElement("button");
-                button.type = "button";
-                button.className = "attack-week-col";
-                button.setAttribute("aria-label", `${safeLabels[index]} ${safeDates[index]}: ${value} events`);
-
-                if (index === safeSeries.length - 1) {
-                    button.classList.add("active-day");
-                }
-
-                const plot = document.createElement("div");
-                plot.className = "attack-week-plot";
-
-                const bar = document.createElement("div");
-                bar.className = "attack-week-bar";
-
-                const valueLabel = document.createElement("div");
-                valueLabel.className = "attack-week-value";
-                valueLabel.textContent = String(value);
-
-                const day = document.createElement("div");
-                day.className = "attack-week-day";
-                day.textContent = safeLabels[index];
-
-                const date = document.createElement("div");
-                date.className = "attack-week-date";
-                date.textContent = safeDates[index];
-
-                const percent = value > 0 ? (value / chartTop) * 100 : 0;
-                bar.style.height = `${percent}%`;
-
-                if (value === 0) {
-                    bar.classList.add("zero-bar");
-                }
-
-                plot.appendChild(bar);
-                button.appendChild(plot);
-                button.appendChild(valueLabel);
-                button.appendChild(day);
-                button.appendChild(date);
-
-                button.addEventListener("click", function () {
-                    const label = `${safeLabels[index]} ${safeDates[index]}`;
-                    openActivityDay(safeIsoDates[index], label);
-                });
-
-                attackWeekChart.appendChild(button);
-            });
-        }
-
-        function updateAttackActivity(series, labels, dates, isoDates, latestType, currentCount, weekCount) {
-            renderAttackWeek(series, labels, dates, isoDates);
-            attackCurrentCount.textContent = String(currentCount ?? 0);
-            attackWeekCount.textContent = String(weekCount ?? 0);
-        }
-
-        function updateDashboard(data) {
-            renderNews(data.newsItems || []);
-            renderVulns(data.recentVulns || []);
-
-            const online = data.feedOnline || data.advisoryOnline;
-            feedStatusText.textContent = online ? "Live Feed Online" : "Feed Offline";
-            liveStatusBar.className = online ? "live-status-bar" : "live-status-bar offline";
-
-            if (data.feedError && data.feedError.trim() !== "") {
-                feedWarning.textContent = data.feedError;
-                feedWarning.classList.remove("hidden-warning");
-            } else {
-                feedWarning.textContent = "";
-                feedWarning.classList.add("hidden-warning");
-            }
-
-            if (data.attackSeries) {
-                updateAttackActivity(
-                    data.attackSeries || [],
-                    data.attackLabels || [],
-                    data.attackDates || [],
-                    data.attackIsoDates || [],
-                    data.attackLatestType || "No Recent Activity",
-                    data.attackCurrentCount || 0,
-                    data.attackWeekCount || 0
-                );
-            }
-        }
-
-        let currentTool = "home";
-
-        const tipLibrary = {
-            home: [
-                "Enable MFA on all primary accounts.",
-                "Prioritize known exploited vulnerabilities first.",
-                "Review CISA alerts regularly for active threat guidance.",
-                "Use long, unique passwords for important services.",
-                "Keep browsers and operating systems fully updated.",
-                "Back up important files regularly.",
-                "Limit admin privileges wherever possible.",
-                "Watch for suspicious links and attachments."
-            ],
-            password: [
-                "Use long passwords or passphrases for better strength.",
-                "Avoid reusing passwords across different websites.",
-                "Longer passwords are usually better than short complex ones.",
-                "Do not include names, birthdays, or common words alone.",
-                "Use a password manager to store strong unique passwords.",
-                "Mix letters, numbers, and symbols when needed.",
-                "Change exposed passwords immediately after a breach.",
-                "Do not save important passwords in plain text files."
-            ],
-            phishing: [
-                "Check sender addresses carefully before trusting messages.",
-                "Hover over links before clicking them.",
-                "Treat urgent account warnings with caution.",
-                "Unexpected attachments should always be reviewed carefully.",
-                "Watch for lookalike domains and subtle misspellings.",
-                "Do not enter credentials on pages reached from suspicious emails.",
-                "Report suspicious emails instead of interacting with them.",
-                "Verify requests for money, login, or MFA codes separately."
-            ],
-            breach: [
-                "Change exposed passwords immediately.",
-                "Do not reuse a password found in a breach.",
-                "Enable MFA after resetting important accounts.",
-                "Review account login history for suspicious access.",
-                "Check recovery email and phone settings.",
-                "Sign out of old sessions after a suspected compromise.",
-                "Update security questions if they are weak or reused.",
-                "Review other accounts using the same or similar password."
-            ]
-        };
-
-        function shuffleArray(array) {
-            const copy = [...array];
-            for (let i = copy.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [copy[i], copy[j]] = [copy[j], copy[i]];
-            }
-            return copy;
-        }
-
-        function detectCurrentTool() {
-            const activeNav = document.querySelector(".dash-nav-item.active");
-            if (activeNav && activeNav.dataset.tool) {
-                currentTool = activeNav.dataset.tool;
-            } else {
-                currentTool = "home";
-            }
-        }
-
-        function getCurrentTips() {
-            return tipLibrary[currentTool] || tipLibrary.home;
-        }
-
-        function renderTips(tips) {
-            tipsList.innerHTML = "";
-
-            if (!tips.length) {
-                tipsEmptyState.classList.remove("hidden-warning");
-                return;
-            }
-
-            tipsEmptyState.classList.add("hidden-warning");
-
-            tips.forEach(tip => {
-                const div = document.createElement("div");
-                div.className = "tip-box";
-                div.textContent = tip;
-                tipsList.appendChild(div);
-            });
-        }
-
-        function loadDefaultTips() {
-            const tips = shuffleArray(getCurrentTips()).slice(0, 3);
-            renderTips(tips);
-        }
-
-        function searchTips() {
-            const query = tipsSearch.value.trim().toLowerCase();
-            const tips = getCurrentTips();
-
-            if (!query) {
-                loadDefaultTips();
-                return;
-            }
-
-            const filtered = tips.filter(tip => tip.toLowerCase().includes(query));
-            renderTips(filtered);
-        }
-
-        shuffleTipsBtn.addEventListener("click", function () {
-            tipsSearch.value = "";
-            loadDefaultTips();
-        });
-
-        tipsSearch.addEventListener("input", function () {
-            searchTips();
-        });
-
-        activityFooterBtn.addEventListener("click", function () {
-            if (!selectedDayDetails) {
-                return;
-            }
-
-            alert(
-                `Selected Day: ${selectedDayDetails.label}\n` +
-                `Events: ${selectedDayDetails.total}\n` +
-                `IP: ${selectedDayDetails.ip}\n` +
-                `Location: ${selectedDayDetails.location}\n` +
-                `Event: ${selectedDayDetails.eventType}\n` +
-                `Time: ${selectedDayDetails.time}\n` +
-                `Device: ${selectedDayDetails.userAgent}`
-            );
-        });
-
-        async function fetchDashboardData(showStatus = true) {
-            try {
-                if (showStatus) {
-                    liveUpdateLabel.textContent = "Refreshing...";
-                }
-
-                const response = await fetch("vuln_stream.php?ts=" + Date.now(), {
-                    cache: "no-store"
-                });
-
-                if (!response.ok) {
-                    throw new Error("Request failed");
-                }
-
-                const data = await response.json();
-                updateDashboard(data);
-                liveUpdateLabel.textContent = "Updated: " + new Date().toLocaleTimeString();
-            } catch (error) {
-                liveUpdateLabel.textContent = "Refresh failed";
-            }
-        }
-
-        manualRefreshBtn.addEventListener("click", function () {
-            fetchDashboardData(true);
-        });
-
-        updateAttackActivity(
-            <?= json_encode($attackMetrics["series"]) ?>,
-            <?= json_encode($attackMetrics["labels"]) ?>,
-            <?= json_encode($attackMetrics["dates"]) ?>,
-            <?= json_encode($attackMetrics["isoDates"]) ?>,
-            <?= json_encode($attackMetrics["latestType"]) ?>,
-            <?= (int) $attackMetrics["currentCount"] ?>,
-            <?= (int) $attackMetrics["weekCount"] ?>
-        );
-
-        detectCurrentTool();
-        loadDefaultTips();
-        fetchDashboardData(false);
-
-        setInterval(function () {
-            fetchDashboardData(false);
-        }, 60000);
-    </script>
 </body>
 </html>
