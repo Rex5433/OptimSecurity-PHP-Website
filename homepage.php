@@ -14,6 +14,7 @@ if (!isset($_SESSION["user_id"])) {
 require_once __DIR__ . "/attack_helpers.php";
 require_once __DIR__ . "/db.php";
 
+$userId = (int) ($_SESSION["user_id"] ?? 0);
 $name = $_SESSION["user_name"] ?? "User";
 
 $kevUrl = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
@@ -75,7 +76,7 @@ function fetchUrl($url)
     return @file_get_contents($url, false, $context);
 }
 
-function buildAttackMetrics(PDO $pdo): array
+function buildAttackMetrics(PDO $pdo, int $userId): array
 {
     $series = [];
     $labels = [];
@@ -90,9 +91,10 @@ function buildAttackMetrics(PDO $pdo): array
         $stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM public.login_activity
-            WHERE created_at BETWEEN ? AND ?
+            WHERE user_id = ?
+              AND created_at BETWEEN ? AND ?
         ");
-        $stmt->execute([$dayStart, $dayEnd]);
+        $stmt->execute([$userId, $dayStart, $dayEnd]);
 
         $count = (int) $stmt->fetchColumn();
 
@@ -113,7 +115,7 @@ function buildAttackMetrics(PDO $pdo): array
         "dates" => $dates,
         "currentCount" => $todayCount,
         "weekCount" => $weekCount,
-        "latestType" => "Activity Recorded"
+        "latestType" => "Your Login Activity"
     ];
 }
 
@@ -211,7 +213,7 @@ if (empty($newsItems)) {
     ];
 }
 
-$attackMetrics = buildAttackMetrics($pdo);
+$attackMetrics = buildAttackMetrics($pdo, $userId);
 
 $alertCount = count($recentVulns);
 $threatScore = getThreatScore($alertCount);
@@ -304,7 +306,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     <div class="chart-box live-chart-box weekly-chart-box">
                         <div class="weekly-chart-topline">
                             <span>This Week</span>
-                            <span>Security Events</span>
+                            <span>Your Security Events</span>
                         </div>
 
                         <div class="attack-week-chart" id="attackWeekChart"></div>
@@ -488,10 +490,10 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     : `${escapeHtml(item.meta || "")}`;
 
                 a.innerHTML = `
-            <div class="news-head">${escapeHtml(item.title || "Untitled Update")}</div>
-            <div class="news-sub">${escapeHtml(item.summary || "")}</div>
-            <div class="news-meta">${metaText}</div>
-        `;
+                    <div class="news-head">${escapeHtml(item.title || "Untitled Update")}</div>
+                    <div class="news-sub">${escapeHtml(item.summary || "")}</div>
+                    <div class="news-meta">${metaText}</div>
+                `;
 
                 newsList.appendChild(a);
             });
@@ -509,19 +511,19 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                     : "";
 
                 row.innerHTML = `
-            <span class="row-dot"></span>
-            <div class="row-main vuln-main">
-                <div class="vuln-title">${escapeHtml(item.title || "Unnamed Vulnerability")}</div>
-                <div class="vuln-summary">${escapeHtml(item.summary || "No description available.")}</div>
-                ${metaHtml}
-            </div>
-            <div class="row-side vuln-status-wrap">
-                <span class="severity-pill sev-default">Known Exploited</span>
-            </div>
-            <div class="row-side vuln-action-wrap">
-                <span class="vuln-action">${escapeHtml(item.action || "Review")}</span>
-            </div>
-        `;
+                    <span class="row-dot"></span>
+                    <div class="row-main vuln-main">
+                        <div class="vuln-title">${escapeHtml(item.title || "Unnamed Vulnerability")}</div>
+                        <div class="vuln-summary">${escapeHtml(item.summary || "No description available.")}</div>
+                        ${metaHtml}
+                    </div>
+                    <div class="row-side vuln-status-wrap">
+                        <span class="severity-pill sev-default">Known Exploited</span>
+                    </div>
+                    <div class="row-side vuln-action-wrap">
+                        <span class="vuln-action">${escapeHtml(item.action || "Review")}</span>
+                    </div>
+                `;
 
                 vulnList.appendChild(row);
             });
@@ -570,7 +572,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                 }
 
                 bar.style.height = `${percent}%`;
-                bar.title = `${safeLabels[index]} ${safeDates[index]}: ${value} event${value === 1 ? "" : "s"}`;
+                bar.title = `${safeLabels[index]} ${safeDates[index]}: ${value} login${value === 1 ? "" : "s"}`;
 
                 const day = document.createElement("div");
                 day.className = "attack-week-day";
@@ -591,7 +593,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
             if (!hasAnyData) {
                 const empty = document.createElement("div");
                 empty.className = "attack-week-empty";
-                empty.textContent = "No activity this week";
+                empty.textContent = "No login activity this week";
                 attackWeekChart.appendChild(empty);
             }
         }
