@@ -22,7 +22,7 @@ $username = $_SESSION["user_username"] ?? "user";
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vault | Security Dashboard</title>
+    <title>Vault | Optimsecurity</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
     <link rel="stylesheet" href="vault.css?v=50">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">

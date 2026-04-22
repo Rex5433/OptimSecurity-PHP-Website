@@ -170,7 +170,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify 2FA</title>
+    <title>Verify 2FA | Optimsecurity</title>
     <link rel="stylesheet" href="vault.css?v=30">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 

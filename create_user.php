@@ -49,7 +49,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Create Account</title>
+    <title>Create Account | Optimsecurity</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 

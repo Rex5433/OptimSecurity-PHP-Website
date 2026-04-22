@@ -372,7 +372,7 @@ if ($activeTwofaSecret !== '') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Security Settings</title>
+    <title>Security Settings | Optimsecurity</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
     <link rel="stylesheet" href="vault.css?v=30">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">

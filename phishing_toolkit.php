@@ -839,7 +839,7 @@ if ($analysisSeverity === 'high') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phishing Toolkit | Security Dashboard</title>
+    <title>Phishing Toolkit | Optimsecurity</title>
     <link rel="stylesheet" href="phishing_toolkit.css">
     <style>
         .scan-actions { gap: 10px; }

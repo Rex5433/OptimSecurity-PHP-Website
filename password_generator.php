@@ -6,7 +6,7 @@ include "db.php";
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Password Generator | Security Dashboard</title>
+    <title>Password Generator | Optimsecurity</title>
     <link rel="stylesheet" href="password_generator.css?v=2">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 

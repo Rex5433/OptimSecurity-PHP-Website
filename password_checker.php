@@ -98,7 +98,7 @@ if ($result) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Password Checker | Security Dashboard</title>
+    <title>Password Checker | Optimsecurity</title>
     <link rel="stylesheet" href="password_checker.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 
