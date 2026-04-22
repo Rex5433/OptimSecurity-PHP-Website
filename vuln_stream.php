@@ -74,38 +74,38 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
         $stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM public.login_activity
-            WHERE user_id = :user_id
-              AND created_at BETWEEN :day_start AND :day_end
-              AND LOWER(TRIM(COALESCE(event_type, ''))) = :event_type
+            WHERE user_id = ?
+              AND created_at BETWEEN ? AND ?
+              AND LOWER(TRIM(COALESCE(event_type, ''))) = ?
         ");
 
         $stmt->execute([
-            ":user_id" => $userId,
-            ":day_start" => $dayStart,
-            ":day_end" => $dayEnd,
-            ":event_type" => "successful_login"
+            $userId,
+            $dayStart,
+            $dayEnd,
+            "successful_login"
         ]);
 
         $count = (int) $stmt->fetchColumn();
 
         $series[] = $count;
-        $labels[] = date("D", strtotime($dayStart));
-        $dates[] = date("M j", strtotime($dayStart));
+        $labels[] = date("D", $dayTs);
+        $dates[] = date("M j", $dayTs);
         $weekCount += $count;
     }
 
     $latestStmt = $pdo->prepare("
         SELECT created_at
         FROM public.login_activity
-        WHERE user_id = :user_id
-          AND LOWER(TRIM(COALESCE(event_type, ''))) = :event_type
+        WHERE user_id = ?
+          AND LOWER(TRIM(COALESCE(event_type, ''))) = ?
         ORDER BY created_at DESC
         LIMIT 1
     ");
 
     $latestStmt->execute([
-        ":user_id" => $userId,
-        ":event_type" => "successful_login"
+        $userId,
+        "successful_login"
     ]);
 
     $latestCreatedAt = $latestStmt->fetchColumn();
