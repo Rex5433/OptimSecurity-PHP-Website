@@ -24,7 +24,7 @@ $username = $_SESSION["user_username"] ?? "user";
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vault | Optimsecurity</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
-    <link rel="stylesheet" href="vault.css?v=50">
+    <link rel="stylesheet" href="vault.css?v=51">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -363,50 +363,66 @@ $username = $_SESSION["user_username"] ?? "user";
     </div>
 
     <div class="vault-modal-backdrop hidden" id="folderModal">
-    <div class="vault-modal" style="max-width: 500px;">
-        <div class="vault-modal-badge">Folder</div>
-        <h2>Create Folder</h2>
+        <div class="vault-modal" style="max-width: 500px;">
+            <div class="vault-modal-badge">Folder</div>
+            <h2>Create Folder</h2>
 
-        <div id="folderMessage" class="vault-inline-message hidden"></div>
+            <div id="folderMessage" class="vault-inline-message hidden"></div>
 
-        <div class="vault-form-group">
-            <label for="folderNameInput">Folder Name</label>
-            <input type="text" id="folderNameInput" placeholder="Enter folder name">
+            <div class="vault-form-group">
+                <label for="folderNameInput">Folder Name</label>
+                <input type="text" id="folderNameInput" placeholder="Enter folder name">
+            </div>
+
+            <div class="vault-actions-row">
+                <button type="button" class="vault-secondary-btn" id="cancelFolderBtn">
+                    Cancel
+                </button>
+
+                <button type="button" class="vault-primary-btn" id="saveFolderBtn">
+                    Create Folder
+                </button>
+            </div>
         </div>
-
-        <div class="vault-actions-row">
-            <button type="button" class="vault-secondary-btn" id="cancelFolderBtn">
-                Cancel
-            </button>
-
-            <button type="button" class="vault-primary-btn" id="saveFolderBtn">
-                Create Folder
-            </button>
-        </div>
-    </div>
     </div>
 
     <script>
-        (() => {
-            if (!sessionStorage.getItem("vault_login_password")) {
-                const loginPassword = prompt("Enter your login password for vault setup:");
-                if (loginPassword) {
+        (function () {
+            function randomRecoveryKey() {
+                const partA = Math.random().toString(36).slice(2, 10);
+                const partB = Math.random().toString(36).slice(2, 10);
+                const partC = Math.random().toString(36).slice(2, 10);
+                const partD = Date.now().toString(36);
+                return "vault-" + partA + "-" + partB + "-" + partC + "-" + partD;
+            }
+
+            let loginPassword = sessionStorage.getItem("vault_login_password") || "";
+            if (!loginPassword) {
+                const entered = prompt("Enter your login password for vault unlock/setup:");
+                if (entered && entered.trim()) {
+                    loginPassword = entered.trim();
                     sessionStorage.setItem("vault_login_password", loginPassword);
                 }
             }
-            
-            if (!sessionStorage.getItem("vault_recovery_key")) {
-                let recoveryKey = prompt("Create and save a vault recovery key. You will need this to recover your vault later:");
-                if (recoveryKey) {
-                    recoveryKey = recoveryKey.trim();
-                    if (recoveryKey) {
-                        sessionStorage.setItem("vault_recovery_key", recoveryKey);
-                    }
-                }
+
+            let recoveryKey =
+                sessionStorage.getItem("vault_recovery_key") ||
+                sessionStorage.getItem("vault_new_recovery_key") ||
+                "";
+
+            if (!recoveryKey) {
+                recoveryKey = randomRecoveryKey();
+                sessionStorage.setItem("vault_recovery_key", recoveryKey);
+
+                alert(
+                    "Your vault recovery key has been created.\n\n" +
+                    recoveryKey +
+                    "\n\nSave this somewhere safe. You will need it to recover your vault later."
+                );
             }
         })();
     </script>
     <script src="vault_crypto.js?v=300"></script>
-    <script src="vault_page.js?v=300"></script>
+    <script src="vault_page.js?v=301"></script>
 </body>
 </html>
