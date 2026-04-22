@@ -704,27 +704,65 @@
         });
     });
 
-    if (newFolderBtn) {
-        newFolderBtn.addEventListener("click", () => {
-            const folderName = window.prompt("Enter a new folder name:");
-            if (!folderName) return;
+    const folderModal = document.getElementById("folderModal");
+const folderNameInput = document.getElementById("folderNameInput");
+const saveFolderBtn = document.getElementById("saveFolderBtn");
+const cancelFolderBtn = document.getElementById("cancelFolderBtn");
+const folderMessage = document.getElementById("folderMessage");
 
-            const trimmed = folderName.trim();
-            if (!trimmed) return;
+function openFolderModal() {
+    if (!folderModal) return;
 
-            if (!knownFolders.includes(trimmed)) {
-                knownFolders.push(trimmed);
-                knownFolders.sort((a, b) => a.localeCompare(b));
-            }
+    folderNameInput.value = "";
+    clearMessage(folderMessage);
 
-            selectedFolder = trimmed;
-            updateFolderFilterButtons();
-            renderFolders();
-            updateStats();
+    folderModal.classList.remove("hidden");
+    folderNameInput.focus();
+}
 
-            if (itemFolder) itemFolder.value = trimmed;
-        });
-    }
+function closeFolderModal() {
+    if (!folderModal) return;
+
+    folderModal.classList.add("hidden");
+    folderNameInput.value = "";
+    clearMessage(folderMessage);
+}
+
+if (newFolderBtn) {
+    newFolderBtn.addEventListener("click", openFolderModal);
+}
+
+if (cancelFolderBtn) {
+    cancelFolderBtn.addEventListener("click", closeFolderModal);
+}
+
+if (saveFolderBtn) {
+    saveFolderBtn.addEventListener("click", () => {
+        const trimmed = folderNameInput.value.trim();
+
+        if (!trimmed) {
+            setMessage(folderMessage, "Folder name is required.", "error");
+            return;
+        }
+
+        if (!knownFolders.includes(trimmed)) {
+            knownFolders.push(trimmed);
+            knownFolders.sort((a, b) => a.localeCompare(b));
+        }
+
+        selectedFolder = trimmed;
+
+        updateFolderFilterButtons();
+        renderFolders();
+        updateStats();
+
+        if (itemFolder) {
+            itemFolder.value = trimmed;
+        }
+
+        closeFolderModal();
+    });
+}
 
     updateTypeFilterButtons();
     updateFolderFilterButtons();
