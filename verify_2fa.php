@@ -41,6 +41,139 @@ if (!$pdo) {
     die("Database connection failed.");
 }
 
+function getClientIpAddress(): string
+{
+    $keys = [
+        "HTTP_CF_CONNECTING_IP",
+        "HTTP_X_FORWARDED_FOR",
+        "HTTP_X_REAL_IP",
+        "REMOTE_ADDR"
+    ];
+
+    foreach ($keys as $key) {
+        $value = trim((string) ($_SERVER[$key] ?? ""));
+        if ($value === "") {
+            continue;
+        }
+
+        if ($key === "HTTP_X_FORWARDED_FOR") {
+            $parts = explode(",", $value);
+            $value = trim((string) ($parts[0] ?? ""));
+        }
+
+        if ($value !== "") {
+            return substr($value, 0, 255);
+        }
+    }
+
+    return "Unknown IP";
+}
+
+function getUserAgentString(): string
+{
+    $ua = trim((string) ($_SERVER["HTTP_USER_AGENT"] ?? ""));
+    return $ua !== "" ? substr($ua, 0, 1000) : "Unknown User Agent";
+}
+
+function fetchIpLocationData(string $ip): array
+{
+    $default = [
+        "location" => "Unknown Location",
+        "city" => "",
+        "region" => "",
+        "country" => ""
+    ];
+
+    if ($ip === "" || $ip === "Unknown IP") {
+        return $default;
+    }
+
+    if (
+        $ip === "::1" ||
+        $ip === "127.0.0.1" ||
+        str_starts_with($ip, "192.168.") ||
+        str_starts_with($ip, "10.") ||
+        preg_match('/^172\.(1[6-9]|2[0-9]|3[0-1])\./', $ip)
+    ) {
+        return [
+            "location" => "Local Network",
+            "city" => "Local",
+            "region" => "Network",
+            "country" => ""
+        ];
+    }
+
+    $url = "http://ip-api.com/json/" . rawurlencode($ip) . "?fields=status,country,regionName,city";
+    $context = stream_context_create([
+        "http" => [
+            "method" => "GET",
+            "timeout" => 2,
+            "header" => "User-Agent: SecurityDashboard/1.0\r\n"
+        ]
+    ]);
+
+    $raw = @file_get_contents($url, false, $context);
+    if ($raw === false) {
+        return $default;
+    }
+
+    $data = json_decode($raw, true);
+    if (!is_array($data) || ($data["status"] ?? "") !== "success") {
+        return $default;
+    }
+
+    $city = trim((string) ($data["city"] ?? ""));
+    $region = trim((string) ($data["regionName"] ?? ""));
+    $country = trim((string) ($data["country"] ?? ""));
+
+    $parts = [];
+    if ($city !== "") {
+        $parts[] = $city;
+    }
+    if ($region !== "") {
+        $parts[] = $region;
+    }
+    if ($country !== "") {
+        $parts[] = $country;
+    }
+
+    return [
+        "location" => !empty($parts) ? implode(", ", $parts) : "Unknown Location",
+        "city" => $city,
+        "region" => $region,
+        "country" => $country
+    ];
+}
+
+function insertLoginActivity(PDO $pdo, ?int $userId, string $eventType): void
+{
+    try {
+        $ipAddress = getClientIpAddress();
+        $userAgent = getUserAgentString();
+        $locationData = fetchIpLocationData($ipAddress);
+
+        $stmt = $pdo->prepare("
+            INSERT INTO public.login_activity
+            (user_id, created_at, event_type, ip_address, location, city, region, country, user_agent)
+            VALUES
+            (:user_id, NOW(), :event_type, :ip_address, :location, :city, :region, :country, :user_agent)
+        ");
+
+        $stmt->execute([
+            "user_id" => $userId,
+            "event_type" => $eventType,
+            "ip_address" => $ipAddress,
+            "location" => $locationData["location"],
+            "city" => $locationData["city"],
+            "region" => $locationData["region"],
+            "country" => $locationData["country"],
+            "user_agent" => $userAgent
+        ]);
+    } catch (Throwable $e) {
+        error_log("verify_2fa login_activity insert failed: " . $e->getMessage());
+    }
+}
+
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $code = strtoupper(trim($_POST["code"] ?? ""));
 
@@ -83,7 +216,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             $valid = false;
 
-            // Standard authenticator code
             if (preg_match('/^\d{6}$/', $code)) {
                 $valid = verifyTotpCode(
                     $twofaSecret,
@@ -95,7 +227,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 );
             }
 
-            // Backup code fallback
             if (!$valid) {
                 $valid = consumeBackupCode($pdo, $pendingUserId, $code);
             }
@@ -124,6 +255,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         "username" => $user["username"]
                     ]
                 );
+
+                insertLoginActivity($pdo, (int) $user["id"], "successful_login");
 
                 $displayName = trim((string) ($user["name"] ?? ""));
                 if ($displayName === "") {
@@ -160,6 +293,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         "reason" => "Invalid TOTP or backup code"
                     ]
                 );
+
+                insertLoginActivity($pdo, $pendingUserId, "failed_login");
             }
         }
     }
