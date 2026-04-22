@@ -499,38 +499,31 @@ $chartTop = max($maxValue + 1, 5);
                     </div>
 
                     <div class="card-actions">
-                        <div class="<?= htmlspecialchars($liveStatusClass) ?>">
+                        <div class="<?= $liveStatusClass ?>" id="liveStatusBar">
                             <span class="live-status-left">
                                 <span class="status-dot"></span>
-                                <span><?= htmlspecialchars($feedStatusText) ?></span>
+                                <span id="feedStatusText"><?= htmlspecialchars($feedStatusText) ?></span>
                             </span>
 
                             <span class="live-status-divider"></span>
 
-                            <span class="live-status-right"><?= htmlspecialchars($serverUpdatedLabel) ?></span>
+                            <span class="live-status-right" id="liveUpdateLabel">Waiting for refresh...</span>
                         </div>
 
-                        <a class="refresh-btn" href="homepage.php">Refresh Feed</a>
+                        <button class="refresh-btn" id="manualRefreshBtn" type="button">Refresh Feed</button>
                     </div>
 
-                    <div class="feed-warning<?= trim($feedError) === '' ? ' hidden-warning' : '' ?>">
+                    <div class="feed-warning<?= trim($feedError) === '' ? ' hidden-warning' : '' ?>" id="feedWarning">
                         <?= htmlspecialchars(trim($feedError)) ?>
                     </div>
 
-                    <div class="news-list">
+                    <div class="news-list" id="newsList">
                         <?php foreach ($newsItems as $item): ?>
-                            <a class="news-item live-news news-link-card"
-                               href="<?= htmlspecialchars($item["link"]) ?>"
-                               target="_blank"
-                               rel="noopener noreferrer">
+                            <a class="news-item live-news news-link-card" href="<?= htmlspecialchars($item["link"]) ?>"
+                                target="_blank" rel="noopener noreferrer">
                                 <div class="news-head"><?= safeText($item["title"]) ?></div>
                                 <div class="news-sub"><?= safeText($item["summary"]) ?></div>
-                                <div class="news-meta">
-                                    <?= safeText($item["meta"]) ?>
-                                    <?php if (!empty($item["date"])): ?>
-                                        • <?= safeText($item["date"]) ?>
-                                    <?php endif; ?>
-                                </div>
+                                <div class="news-meta"><?= safeText($item["meta"]) ?></div>
                             </a>
                         <?php endforeach; ?>
                     </div>
