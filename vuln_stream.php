@@ -72,11 +72,12 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
         $dayEnd = date("Y-m-d 23:59:59", $dayTs);
 
         $stmt = $pdo->prepare("
-            SELECT COUNT(*)
+            SELECT created_at
             FROM public.login_activity
             WHERE user_id = ?
-              AND created_at BETWEEN ? AND ?
               AND LOWER(TRIM(COALESCE(event_type, ''))) = 'successful_login'
+            ORDER BY created_at DESC
+            LIMIT 1
         ");
         $stmt->execute([$userId, $dayStart, $dayEnd]);
 
