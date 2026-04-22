@@ -7,6 +7,7 @@ $success = "";
 $name = "";
 $username = "";
 $email = "";
+$show_passwords = false;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
@@ -15,6 +16,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $email = trim($_POST["email"] ?? "");
     $password_input = trim($_POST["password"] ?? "");
     $confirm_password = trim($_POST["confirm_password"] ?? "");
+    $show_passwords = isset($_POST["show_passwords"]);
 
     if (
         empty($name) ||
@@ -77,11 +79,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 "password" => $hashed_password
             ]);
 
-            $success = "Account created successfully. You can now log in.";
-
-            $name = "";
-            $username = "";
-            $email = "";
+            header("Location: login.php?created=1");
+            exit;
         }
 
     } else {
@@ -135,17 +134,33 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" name="password" id="password" required>
+                    <input
+                        type="<?= $show_passwords ? 'text' : 'password' ?>"
+                        name="password"
+                        id="password"
+                        required
+                    >
                 </div>
 
                 <div class="form-group">
                     <label>Confirm Password</label>
-                    <input type="password" name="confirm_password" id="confirm_password" required>
+                    <input
+                        type="<?= $show_passwords ? 'text' : 'password' ?>"
+                        name="confirm_password"
+                        id="confirm_password"
+                        required
+                    >
                 </div>
 
                 <div class="options-row create-account-options">
                     <label class="checkbox-container">
-                        <input type="checkbox" onclick="togglePasswords()">
+                        <input
+                            type="checkbox"
+                            name="show_passwords"
+                            id="show_passwords"
+                            onclick="togglePasswords()"
+                            <?= $show_passwords ? 'checked' : '' ?>
+                        >
                         <span>Show Passwords</span>
                     </label>
                 </div>
@@ -165,8 +180,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         function togglePasswords() {
             const password = document.getElementById("password");
             const confirmPassword = document.getElementById("confirm_password");
+            const checkbox = document.getElementById("show_passwords");
 
-            if (password.type === "password") {
+            if (checkbox.checked) {
                 password.type = "text";
                 confirmPassword.type = "text";
             } else {

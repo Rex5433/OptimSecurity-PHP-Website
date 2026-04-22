@@ -16,6 +16,10 @@ require_once __DIR__ . "/attack_helpers.php";
 
 $message = "";
 
+if (isset($_GET["created"]) && $_GET["created"] === "1") {
+    $message = "Account created successfully. You can now log in.";
+}
+
 /*
 |--------------------------------------------------------------------------
 | Clear stale pending 2FA session values on fresh login page load
@@ -203,7 +207,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         <h1>Login</h1>
 
         <?php if ($message): ?>
-            <div class="login-error"><?= htmlspecialchars($message) ?></div>
+            <div class="<?= (isset($_GET["created"]) && $_GET["created"] === "1") ? 'login-success' : 'login-error' ?>">
+                <?= htmlspecialchars($message) ?>
+            </div>
         <?php endif; ?>
 
         <form method="post" action="" id="loginForm" novalidate>
