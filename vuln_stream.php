@@ -1,15 +1,18 @@
 <?php
 session_start();
+
 require_once __DIR__ . "/attack_helpers.php";
+require_once __DIR__ . "/db.php";
 
 header("Content-Type: application/json");
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 header("Expires: 0");
 
+$userId = (int) ($_SESSION["user_id"] ?? 0);
+
 $kevUrl = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 $advisoriesUrl = "https://www.cisa.gov/news-events/cybersecurity-advisories";
-$attackEventsFile = __DIR__ . "/attack_events.json";
 
 function getThreatScore($count)
 {
@@ -55,55 +58,49 @@ function fetchUrl($url)
     return @file_get_contents($url, false, $context);
 }
 
-function readAttackEvents(string $file): array
+function buildAttackMetrics(PDO $pdo, int $userId): array
 {
-    if (!file_exists($file)) {
-        file_put_contents($file, "[]");
-    }
-
-    $json = file_get_contents($file);
-    $events = json_decode($json, true);
-
-    return is_array($events) ? $events : [];
-}
-
-function buildAttackMetrics(string $file): array
-{
-    $events = readAttackEvents($file);
     $series = [];
     $labels = [];
     $dates = [];
     $weekCount = 0;
+    $latestType = "No Recent Activity";
 
     for ($i = 6; $i >= 0; $i--) {
         $dayTs = strtotime("-$i days");
-        $dayStart = strtotime(date("Y-m-d 00:00:00", $dayTs));
-        $dayEnd = strtotime(date("Y-m-d 23:59:59", $dayTs));
+        $dayStart = date("Y-m-d 00:00:00", $dayTs);
+        $dayEnd = date("Y-m-d 23:59:59", $dayTs);
 
-        $count = 0;
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM public.login_activity
+            WHERE user_id = ?
+              AND created_at BETWEEN ? AND ?
+        ");
+        $stmt->execute([$userId, $dayStart, $dayEnd]);
 
-        foreach ($events as $event) {
-            $timestamp = strtotime($event["timestamp"] ?? "");
-            if (!$timestamp) {
-                continue;
-            }
-
-            if ($timestamp >= $dayStart && $timestamp <= $dayEnd) {
-                $count++;
-            }
-        }
+        $count = (int) $stmt->fetchColumn();
 
         $series[] = $count;
-        $labels[] = date("D", $dayStart);
-        $dates[] = date("M j", $dayStart);
+        $labels[] = date("D", strtotime($dayStart));
+        $dates[] = date("M j", strtotime($dayStart));
         $weekCount += $count;
     }
 
-    usort($events, function ($a, $b) {
-        return strtotime($b["timestamp"] ?? "") <=> strtotime($a["timestamp"] ?? "");
-    });
+    $latestStmt = $pdo->prepare("
+        SELECT event_type
+        FROM public.login_activity
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+    ");
+    $latestStmt->execute([$userId]);
 
-    $latest = $events[0] ?? null;
+    $latestEventType = $latestStmt->fetchColumn();
+    if ($latestEventType !== false && trim((string) $latestEventType) !== "") {
+        $latestType = formatAttackType((string) $latestEventType);
+    }
+
     $todayCount = end($series);
     if ($todayCount === false) {
         $todayCount = 0;
@@ -115,7 +112,7 @@ function buildAttackMetrics(string $file): array
         "dates" => $dates,
         "currentCount" => $todayCount,
         "weekCount" => $weekCount,
-        "latestType" => $latest ? formatAttackType((string) ($latest["type"] ?? "")) : "No Recent Activity"
+        "latestType" => $latestType
     ];
 }
 
@@ -312,7 +309,18 @@ if (empty($newsItems)) {
     ];
 }
 
-$attackMetrics = buildAttackMetrics($attackEventsFile);
+if ($pdo instanceof PDO && $userId > 0) {
+    $attackMetrics = buildAttackMetrics($pdo, $userId);
+} else {
+    $attackMetrics = [
+        "series" => [0, 0, 0, 0, 0, 0, 0],
+        "labels" => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "dates" => ["", "", "", "", "", "", ""],
+        "currentCount" => 0,
+        "weekCount" => 0,
+        "latestType" => "No Recent Activity"
+    ];
+}
 
 echo json_encode([
     "newsItems" => $newsItems,
