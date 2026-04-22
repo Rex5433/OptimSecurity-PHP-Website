@@ -705,64 +705,64 @@
     });
 
     const folderModal = document.getElementById("folderModal");
-const folderNameInput = document.getElementById("folderNameInput");
-const saveFolderBtn = document.getElementById("saveFolderBtn");
-const cancelFolderBtn = document.getElementById("cancelFolderBtn");
-const folderMessage = document.getElementById("folderMessage");
+    const folderNameInput = document.getElementById("folderNameInput");
+    const saveFolderBtn = document.getElementById("saveFolderBtn");
+    const cancelFolderBtn = document.getElementById("cancelFolderBtn");
+    const folderMessage = document.getElementById("folderMessage");
 
-function openFolderModal() {
-    if (!folderModal) return;
+    function openFolderModal() {
+        if (!folderModal) return;
 
-    folderNameInput.value = "";
-    clearMessage(folderMessage);
+        folderNameInput.value = "";
+        clearMessage(folderMessage);
 
-    folderModal.classList.remove("hidden");
-    folderNameInput.focus();
-}
+        folderModal.classList.remove("hidden");
+        folderNameInput.focus();
+    }
 
-function closeFolderModal() {
-    if (!folderModal) return;
+    function closeFolderModal() {
+        if (!folderModal) return;
 
-    folderModal.classList.add("hidden");
-    folderNameInput.value = "";
-    clearMessage(folderMessage);
-}
+        folderModal.classList.add("hidden");
+        folderNameInput.value = "";
+        clearMessage(folderMessage);
+    }
 
-if (newFolderBtn) {
-    newFolderBtn.addEventListener("click", openFolderModal);
-}
+    if (newFolderBtn) {
+        newFolderBtn.addEventListener("click", openFolderModal);
+    }
 
-if (cancelFolderBtn) {
-    cancelFolderBtn.addEventListener("click", closeFolderModal);
-}
+    if (cancelFolderBtn) {
+        cancelFolderBtn.addEventListener("click", closeFolderModal);
+    }
 
-if (saveFolderBtn) {
-    saveFolderBtn.addEventListener("click", () => {
-        const trimmed = folderNameInput.value.trim();
+    if (saveFolderBtn) {
+        saveFolderBtn.addEventListener("click", () => {
+            const trimmed = folderNameInput.value.trim();
 
-        if (!trimmed) {
-            setMessage(folderMessage, "Folder name is required.", "error");
-            return;
-        }
+            if (!trimmed) {
+                setMessage(folderMessage, "Folder name is required.", "error");
+                return;
+            }
 
-        if (!knownFolders.includes(trimmed)) {
-            knownFolders.push(trimmed);
-            knownFolders.sort((a, b) => a.localeCompare(b));
-        }
+            if (!knownFolders.includes(trimmed)) {
+                knownFolders.push(trimmed);
+                knownFolders.sort((a, b) => a.localeCompare(b));
+            }
 
-        selectedFolder = trimmed;
+            selectedFolder = trimmed;
 
-        updateFolderFilterButtons();
-        renderFolders();
-        updateStats();
+            updateFolderFilterButtons();
+            renderFolders();
+            updateStats();
 
-        if (itemFolder) {
-            itemFolder.value = trimmed;
-        }
+            if (itemFolder) {
+                itemFolder.value = trimmed;
+            }
 
-        closeFolderModal();
-    });
-}
+            closeFolderModal();
+        });
+    }
 
     updateTypeFilterButtons();
     updateFolderFilterButtons();
