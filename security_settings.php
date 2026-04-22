@@ -25,6 +25,7 @@ if (!isset($_SESSION["user_id"])) {
 
 include "db.php";
 require_once __DIR__ . "/twofa_helpers.php";
+require_once __DIR__ . "/recovery_helpers.php";
 
 if (empty($_SESSION["csrf_token"])) {
     $_SESSION["csrf_token"] = bin2hex(random_bytes(32));
@@ -49,6 +50,9 @@ $message = "";
 $success = "";
 $backupCodes = $_SESSION["twofa_plain_backup_codes"] ?? [];
 unset($_SESSION["twofa_plain_backup_codes"]);
+
+$newRecoveryKey = $_SESSION["plain_recovery_key"] ?? "";
+unset($_SESSION["plain_recovery_key"]);
 
 if (!$pdo) {
     if (is_ajax_request()) {
@@ -82,6 +86,9 @@ if (!$user) {
 
     die("User not found.");
 }
+
+$hasRecoveryKey = userHasRecoveryKey($pdo, $userId);
+$recoveryKeyCreatedAt = getRecoveryKeyCreatedAt($pdo, $userId);
 
 $vaultProfileStmt = $pdo->prepare('
     SELECT id, wrapped_vault_key, wrapped_vault_key_iv
@@ -168,6 +175,26 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $_SESSION["twofa_plain_backup_codes"] = $backupCodes;
 
                     $success = "Two-factor authentication has been enabled.";
+                }
+            }
+        }
+
+        if ($action === "generate_recovery_key") {
+            $recoveryPassword = $_POST["recovery_password"] ?? "";
+
+            if ($recoveryPassword === "") {
+                $message = "Enter your current password to generate a recovery key.";
+            } elseif (!password_verify($recoveryPassword, (string) $user["password"])) {
+                $message = "Current password is incorrect.";
+            } else {
+                $plainRecoveryKey = generateRecoveryKey();
+
+                if (saveRecoveryKey($pdo, $userId, $plainRecoveryKey)) {
+                    $_SESSION["plain_recovery_key"] = $plainRecoveryKey;
+                    header("Location: security_settings.php?recovery_key=1");
+                    exit;
+                } else {
+                    $message = "Could not generate recovery key right now.";
                 }
             }
         }
@@ -297,6 +324,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $deleteProfile = $pdo->prepare('DELETE FROM public.vault_profile WHERE user_id = :user_id');
                     $deleteProfile->execute(['user_id' => $userId]);
 
+                    $deleteRecovery = $pdo->prepare('DELETE FROM public.account_recovery_keys WHERE user_id = :user_id');
+                    $deleteRecovery->execute(['user_id' => $userId]);
+
                     $deleteAccount = $pdo->prepare('DELETE FROM "Accounts" WHERE id = :id');
                     $deleteAccount->execute(['id' => $userId]);
 
@@ -327,6 +357,9 @@ $stmt = $pdo->prepare('
 ');
 $stmt->execute(['id' => $userId]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+$hasRecoveryKey = userHasRecoveryKey($pdo, $userId);
+$recoveryKeyCreatedAt = getRecoveryKeyCreatedAt($pdo, $userId);
 
 $twofaRaw = $user["twofa_enabled"] ?? false;
 $twofaEnabled = (
@@ -368,7 +401,6 @@ if ($activeTwofaSecret !== '') {
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -376,10 +408,8 @@ if ($activeTwofaSecret !== '') {
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
     <link rel="stylesheet" href="vault.css?v=30">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
-
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="manifest" href="/site.webmanifest">
 </head>
@@ -406,7 +436,7 @@ if ($activeTwofaSecret !== '') {
                 <div>
                     <div class="vault-badge">Security</div>
                     <h1>Security Settings</h1>
-                    <p>Manage your account security, 2FA, password, and account access.</p>
+                    <p>Manage your account security, 2FA, password, recovery access, and account access.</p>
                 </div>
                 <div class="vault-topbar-right">
                     <div class="vault-user-chip">@<?= htmlspecialchars($username) ?></div>
@@ -420,6 +450,18 @@ if ($activeTwofaSecret !== '') {
 
                 <?php if ($success): ?>
                     <div class="vault-inline-message success"><?= htmlspecialchars($success) ?></div>
+                <?php endif; ?>
+
+                <?php if ($newRecoveryKey !== ""): ?>
+                    <div class="vault-inline-message success">
+                        Save this recovery key now. It will only be shown once.
+                    </div>
+                    <div class="vault-panel-card" style="margin-top: 14px;">
+                        <div class="vault-panel-title">Your Recovery Key</div>
+                        <div class="vault-stat-card" style="margin-top:12px; text-align:center; font-weight:800; letter-spacing:1px; font-size:1.08rem;">
+                            <?= htmlspecialchars($newRecoveryKey) ?>
+                        </div>
+                    </div>
                 <?php endif; ?>
 
                 <div class="vault-stats-row">
@@ -441,6 +483,11 @@ if ($activeTwofaSecret !== '') {
                                 : "Not Set" ?>
                         </span>
                     </div>
+
+                    <div class="vault-stat-card">
+                        <span class="vault-stat-label">Recovery Key</span>
+                        <span class="vault-stat-value"><?= $hasRecoveryKey ? "Configured" : "Not Set" ?></span>
+                    </div>
                 </div>
 
                 <?php if (!empty($backupCodes)): ?>
@@ -459,6 +506,43 @@ if ($activeTwofaSecret !== '') {
                         </div>
                     </div>
                 <?php endif; ?>
+
+                <div class="vault-panel-card" style="margin-top: 20px;">
+                    <div class="vault-panel-title">Recovery Key</div>
+                    <p style="color:#9bb3c3; margin-bottom:16px;">
+                        Generate a recovery key for password reset when email recovery is not available.
+                    </p>
+
+                    <div class="vault-stats-row" style="margin-bottom:18px;">
+                        <div class="vault-stat-card">
+                            <span class="vault-stat-label">Status</span>
+                            <span class="vault-stat-value"><?= $hasRecoveryKey ? "Configured" : "Not Set" ?></span>
+                        </div>
+
+                        <div class="vault-stat-card">
+                            <span class="vault-stat-label">Last Generated</span>
+                            <span class="vault-stat-value">
+                                <?= $recoveryKeyCreatedAt ? date("M j, Y", strtotime($recoveryKeyCreatedAt)) : "Never" ?>
+                            </span>
+                        </div>
+                    </div>
+
+                    <form method="post">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+                        <input type="hidden" name="action" value="generate_recovery_key">
+
+                        <div class="vault-form-group">
+                            <label for="recovery_password">Current Password</label>
+                            <input type="password" id="recovery_password" name="recovery_password" required>
+                        </div>
+
+                        <div class="vault-actions-row" style="justify-content:flex-start;">
+                            <button type="submit" class="vault-primary-btn">
+                                <?= $hasRecoveryKey ? "Rotate Recovery Key" : "Generate Recovery Key" ?>
+                            </button>
+                        </div>
+                    </form>
+                </div>
 
                 <div class="vault-grid" style="margin-top: 20px;">
                     <div class="vault-panel-card">
@@ -479,8 +563,7 @@ if ($activeTwofaSecret !== '') {
                                         again on another device.
                                     </p>
 
-                                    <div
-                                        style="display:flex; justify-content:center; align-items:center; background:#041c2b; border:1px solid #25475b; border-radius:16px; padding:18px;">
+                                    <div style="display:flex; justify-content:center; align-items:center; background:#041c2b; border:1px solid #25475b; border-radius:16px; padding:18px;">
                                         <img src="<?= htmlspecialchars($qrUrl) ?>" alt="2FA QR Code"
                                             style="width:240px; max-width:100%; height:auto; background:#fff; border-radius:12px; padding:12px; display:block;">
                                     </div>
@@ -493,16 +576,14 @@ if ($activeTwofaSecret !== '') {
                             </p>
 
                             <?php if ($qrUrl !== ''): ?>
-                                <div
-                                    style="display:flex; justify-content:center; align-items:center; background:#041c2b; border:1px solid #25475b; border-radius:16px; padding:18px; margin-bottom:18px;">
+                                <div style="display:flex; justify-content:center; align-items:center; background:#041c2b; border:1px solid #25475b; border-radius:16px; padding:18px; margin-bottom:18px;">
                                     <img src="<?= htmlspecialchars($qrUrl) ?>" alt="2FA QR Code"
                                         style="width:240px; max-width:100%; height:auto; background:#fff; border-radius:12px; padding:12px; display:block;">
                                 </div>
                             <?php endif; ?>
 
                             <form method="post">
-                                <input type="hidden" name="csrf_token"
-                                    value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
                                 <input type="hidden" name="action" value="enable_2fa">
 
                                 <div class="vault-form-group">
@@ -513,8 +594,7 @@ if ($activeTwofaSecret !== '') {
 
                                 <div class="vault-actions-row" style="justify-content:flex-start; margin-top:20px;">
                                     <button type="submit" class="vault-primary-btn">Enable 2FA</button>
-                                    <button type="submit" name="regenerate_twofa" value="1"
-                                        class="vault-secondary-btn">Generate New Secret</button>
+                                    <button type="submit" name="regenerate_twofa" value="1" class="vault-secondary-btn">Generate New Secret</button>
                                 </div>
                             </form>
                         <?php endif; ?>
@@ -524,8 +604,7 @@ if ($activeTwofaSecret !== '') {
                         <div class="vault-panel-title">Change Password</div>
 
                         <form method="post" id="changePasswordForm">
-                            <input type="hidden" name="csrf_token"
-                                value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
                             <input type="hidden" name="action" value="change_password">
                             <input type="hidden" name="wrapped_vault_key" id="wrapped_vault_key" value="">
                             <input type="hidden" name="wrapped_vault_key_iv" id="wrapped_vault_key_iv" value="">
@@ -546,8 +625,7 @@ if ($activeTwofaSecret !== '') {
                             </div>
 
                             <div class="vault-actions-row" style="justify-content:flex-start;">
-                                <button type="submit" class="vault-primary-btn" id="updatePasswordBtn">Update
-                                    Password</button>
+                                <button type="submit" class="vault-primary-btn" id="updatePasswordBtn">Update Password</button>
                             </div>
                         </form>
                     </div>
@@ -556,7 +634,7 @@ if ($activeTwofaSecret !== '') {
                 <div class="vault-panel-card" style="margin-top: 20px;">
                     <div class="vault-panel-title" style="color:#ff9b9b;">Delete Account</div>
                     <p style="color:#9bb3c3; margin-bottom:16px;">
-                        This permanently deletes your account, vault items, and vault profile.
+                        This permanently deletes your account, vault items, vault profile, and recovery key.
                     </p>
 
                     <form method="post">
@@ -631,5 +709,4 @@ if ($activeTwofaSecret !== '') {
         })();
     </script>
 </body>
-
 </html>
