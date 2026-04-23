@@ -148,6 +148,14 @@
         );
     }
 
+    async function saveVaultProfile(profilePayload) {
+        return apiFetch("vault_init.php", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(profilePayload)
+        });
+    }
+
     async function bootstrapVaultKey() {
         const password = sessionStorage.getItem("vault_login_password") || "";
         if (!password) {
@@ -158,29 +166,26 @@
 
         if (!profileRes.exists || !profileRes.profile) {
             let recoveryKey = getRecoveryKeyForVaultInit();
-            
+
             if (!recoveryKey) {
                 recoveryKey = "vault-recovery-" + Math.random().toString(36).slice(2) + "-" + Date.now();
                 sessionStorage.setItem("vault_recovery_key", recoveryKey);
                 alert("Your vault recovery key is:\n\n" + recoveryKey + "\n\nSave this somewhere safe.");
             }
-            
+
             const created = await window.VaultCrypto.createVaultProfile(password, recoveryKey);
-            
-            await apiFetch("vault_init.php", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    vault_salt: created.salt,
-                    vault_iterations: created.iterations,
-                    vault_key_check: created.vault_key_check,
-                    wrapped_vault_key: created.wrapped_vault_key,
-                    wrapped_vault_key_iv: created.wrapped_vault_key_iv,
-                    wrapped_vault_key_recovery: created.wrapped_vault_key_recovery,
-                    wrapped_vault_key_recovery_iv: created.wrapped_vault_key_recovery_iv
-                })
+
+            await saveVaultProfile({
+                vault_salt: created.salt,
+                vault_iterations: created.iterations,
+                vault_key_check: created.vault_key_check,
+                wrapped_vault_key: created.wrapped_vault_key,
+                wrapped_vault_key_iv: created.wrapped_vault_key_iv,
+                wrapped_vault_key_recovery: created.wrapped_vault_key_recovery,
+                wrapped_vault_key_recovery_iv: created.wrapped_vault_key_recovery_iv,
+                plain_recovery_key: recoveryKey
             });
-            
+
             vaultKey = created.vaultKey;
             return;
         }
@@ -191,7 +196,48 @@
             throw new Error("Missing vault profile fields.");
         }
 
-        vaultKey = await window.VaultCrypto.unlockVaultFromProfile(password, profile);
+        try {
+            vaultKey = await window.VaultCrypto.unlockVaultFromProfile(password, profile);
+            return;
+        } catch (passwordError) {
+            const recoveryKey = getRecoveryKeyForVaultInit();
+
+            if (!recoveryKey) {
+                throw passwordError;
+            }
+
+            try {
+                vaultKey = await window.VaultCrypto.unlockVaultFromRecoveryKey(recoveryKey, profile);
+
+                const wrappedPassword = await window.VaultCrypto.rewrapVaultFromRecoveryToPassword(
+                    recoveryKey,
+                    password,
+                    profile
+                );
+
+                const wrappedRecovery = await window.VaultCrypto.rewrapVaultKeyWithRecovery(
+                    recoveryKey,
+                    recoveryKey,
+                    profile
+                );
+
+                await saveVaultProfile({
+                    vault_salt: profile.vault_salt,
+                    vault_iterations: profile.vault_iterations,
+                    vault_key_check: profile.vault_key_check,
+                    wrapped_vault_key: wrappedPassword.wrapped_vault_key,
+                    wrapped_vault_key_iv: wrappedPassword.wrapped_vault_key_iv,
+                    wrapped_vault_key_recovery: wrappedRecovery.wrapped_vault_key_recovery,
+                    wrapped_vault_key_recovery_iv: wrappedRecovery.wrapped_vault_key_recovery_iv,
+                    plain_recovery_key: recoveryKey
+                });
+
+                setMessage(pageMessage, "Vault access repaired using your recovery key.", "success");
+                return;
+            } catch (recoveryError) {
+                throw recoveryError;
+            }
+        }
     }
 
     function showTemplate(type) {
