@@ -11,7 +11,6 @@ if (!isset($_SESSION["user_id"])) {
 }
 
 $username = $_SESSION["password_reset_username_done"] ?? ($_SESSION["user_username"] ?? "user");
-$recoveryKey = $_SESSION["password_reset_recovery_key"] ?? "";
 $newPassword = $_SESSION["password_reset_new_password"] ?? "";
 $newRecoveryKey = $_SESSION["password_reset_new_recovery_key"] ?? "";
 $vaultPresent = ($_SESSION["password_reset_vault_present"] ?? "0") === "1";
