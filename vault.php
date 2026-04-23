@@ -22,16 +22,9 @@ $username = $_SESSION["user_username"] ?? "user";
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vault | Optimsecurity</title>
+    <title>Vault | Security Dashboard</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
-    <link rel="stylesheet" href="vault.css?v=52">
-    <link rel="icon" href="/favicon.ico" type="image/x-icon">
-
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="manifest" href="/site.webmanifest">
+    <link rel="stylesheet" href="vault.css?v=50">
 </head>
 <body class="vault-body">
     <div class="vault-shell">
@@ -58,7 +51,7 @@ $username = $_SESSION["user_username"] ?? "user";
                 <div>
                     <div class="vault-badge">Vault</div>
                     <h1>All Vault Items</h1>
-                    <p>Welcome back, <?= htmlspecialchars($name) ?>.</p>
+                    <p>Welcome back, <?= htmlspecialchars($name) ?></p>
                 </div>
 
                 <div class="vault-topbar-right">
@@ -362,45 +355,7 @@ $username = $_SESSION["user_username"] ?? "user";
         </div>
     </div>
 
-    <div class="vault-modal-backdrop hidden" id="folderModal">
-        <div class="vault-modal" style="max-width: 500px;">
-            <div class="vault-modal-badge">Folder</div>
-            <h2>Create Folder</h2>
-
-            <div id="folderMessage" class="vault-inline-message hidden"></div>
-
-            <div class="vault-form-group">
-                <label for="folderNameInput">Folder Name</label>
-                <input type="text" id="folderNameInput" placeholder="Enter folder name">
-            </div>
-
-            <div class="vault-actions-row">
-                <button type="button" class="vault-secondary-btn" id="cancelFolderBtn">
-                    Cancel
-                </button>
-
-                <button type="button" class="vault-primary-btn" id="saveFolderBtn">
-                    Create Folder
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        (function () {
-            sessionStorage.removeItem("vault_new_recovery_key");
-
-            let loginPassword = sessionStorage.getItem("vault_login_password") || "";
-            if (!loginPassword) {
-                const entered = prompt("Enter your current login password to unlock your vault:");
-                if (entered && entered.trim()) {
-                    loginPassword = entered.trim();
-                    sessionStorage.setItem("vault_login_password", loginPassword);
-                }
-            }
-        })();
-    </script>
-    <script src="vault_crypto.js?v=300"></script>
-    <script src="vault_page.js?v=302"></script>
+    <script src="vault_crypto.js?v=100"></script>
+    <script src="vault_page.js?v=100"></script>
 </body>
 </html>
