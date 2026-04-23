@@ -899,10 +899,18 @@ if ($analysisSeverity === 'high') {
                             <?= htmlspecialchars($riskLabel) ?>
                         </div>
                     </div>
+                </section>
+
+                <section class="simple-card phishing-input-card">
+                    <div class="tool-card-header">
+                        <h2>Analyze Suspicious Content</h2>
+                        <p>Paste suspicious email headers, sender information, or URLs for phishing analysis.</p>
+                    </div>
 
                     <form method="POST" action="">
                         <div class="form-group">
                             <label for="email_content">Suspicious Content</label>
+
                             <textarea
                                 id="email_content"
                                 name="email_content"
