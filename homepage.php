@@ -249,7 +249,9 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
 <body class="dashboard-body">
     <div class="dash-shell">
         <aside class="dash-sidebar">
-            <div class="dash-sidebar-title">Dashboard</div>
+            <div class="dash-sidebar-title">
+                <img src="optimsecurity-logo.png" alt="Optimsecurity" class="sidebar-logo">
+            </div>
 
             <nav class="dash-nav">
                 <a class="dash-nav-item active" href="homepage.php" data-tool="home">Home</a>
