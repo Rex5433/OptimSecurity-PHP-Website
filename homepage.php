@@ -223,6 +223,25 @@ function fetchUnit42News(string $url): array
     return $items;
 }
 
+function formatEventTypeLabel(string $eventType): string
+{
+    $eventType = strtolower(trim($eventType));
+
+    if ($eventType === "successful_login") {
+        return "Successful Login";
+    }
+
+    if ($eventType === "failed_login") {
+        return "Failed Login";
+    }
+
+    if ($eventType === "") {
+        return "No Recent Activity";
+    }
+
+    return ucwords(str_replace("_", " ", $eventType));
+}
+
 function buildAttackMetrics(PDO $pdo, int $userId): array
 {
     $series = [];
@@ -230,31 +249,36 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
     $dates = [];
     $weekCount = 0;
 
+    $tz = new DateTimeZone("America/Chicago");
+    $today = new DateTimeImmutable("now", $tz);
+    $today = $today->setTime(0, 0, 0);
+
+    $countStmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM public.login_activity
+        WHERE user_id = ?
+          AND created_at BETWEEN ? AND ?
+          AND LOWER(TRIM(COALESCE(event_type, ''))) = ?
+    ");
+
     for ($i = 6; $i >= 0; $i--) {
-        $dayTs = strtotime("-$i days");
-        $dayStart = date("Y-m-d 00:00:00", $dayTs);
-        $dayEnd = date("Y-m-d 23:59:59", $dayTs);
+        $day = $today->modify("-{$i} days");
 
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*)
-            FROM public.login_activity
-            WHERE user_id = ?
-              AND created_at BETWEEN ? AND ?
-              AND LOWER(TRIM(COALESCE(event_type, ''))) = ?
-        ");
+        $dayStart = $day->format("Y-m-d 00:00:00");
+        $dayEnd = $day->format("Y-m-d 23:59:59");
 
-        $stmt->execute([
+        $countStmt->execute([
             $userId,
             $dayStart,
             $dayEnd,
             "successful_login"
         ]);
 
-        $count = (int) $stmt->fetchColumn();
+        $count = (int) $countStmt->fetchColumn();
 
         $series[] = $count;
-        $labels[] = date("D", $dayTs);
-        $dates[] = date("M j", $dayTs);
+        $labels[] = $day->format("D");
+        $dates[] = $day->format("M j");
         $weekCount += $count;
     }
 
@@ -263,13 +287,71 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
         $todayCount = 0;
     }
 
+    $latestType = "No Recent Activity";
+    $latestDetails = "No recent login details available.";
+
+    $latestStmt = $pdo->prepare("
+        SELECT event_type, created_at, ip_address, location, city, region, country
+        FROM public.login_activity
+        WHERE user_id = ?
+          AND LOWER(TRIM(COALESCE(event_type, ''))) = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+    ");
+
+    $latestStmt->execute([
+        $userId,
+        "successful_login"
+    ]);
+
+    $latestRow = $latestStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($latestRow) {
+        $latestType = formatEventTypeLabel((string) ($latestRow["event_type"] ?? ""));
+
+        $detailParts = [];
+
+        $createdAtRaw = trim((string) ($latestRow["created_at"] ?? ""));
+        if ($createdAtRaw !== "") {
+            $createdTs = strtotime($createdAtRaw);
+            if ($createdTs !== false) {
+                $detailParts[] = date("M j, Y g:i A", $createdTs);
+            }
+        }
+
+        $city = trim((string) ($latestRow["city"] ?? ""));
+        $region = trim((string) ($latestRow["region"] ?? ""));
+        $country = trim((string) ($latestRow["country"] ?? ""));
+        $location = trim((string) ($latestRow["location"] ?? ""));
+
+        $locationParts = array_values(array_filter([$city, $region, $country], function ($value) {
+            return trim((string) $value) !== "";
+        }));
+
+        if (!empty($locationParts)) {
+            $detailParts[] = implode(", ", $locationParts);
+        } elseif ($location !== "") {
+            $detailParts[] = $location;
+        }
+
+        $ipAddress = trim((string) ($latestRow["ip_address"] ?? ""));
+        if ($ipAddress !== "") {
+            $detailParts[] = "IP: " . $ipAddress;
+        }
+
+        if (!empty($detailParts)) {
+            $latestDetails = implode(" • ", $detailParts);
+        }
+    }
+
     return [
         "series" => $series,
         "labels" => $labels,
         "dates" => $dates,
         "currentCount" => $todayCount,
         "weekCount" => $weekCount,
-        "latestType" => $weekCount > 0 ? "Successful Login" : "No Recent Activity"
+        "latestType" => $latestType,
+        "latestDetails" => $latestDetails
     ];
 }
 
@@ -521,6 +603,9 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
                     <div class="chart-meta" id="attackTrendMeta">
                         Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
                     </div>
+                    <div class="chart-meta" id="attackTrendDetails">
+                        <?= htmlspecialchars($attackMetrics["latestDetails"]) ?>
+                    </div>
                 </div>
             </section>
 
@@ -653,6 +738,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
         const manualRefreshBtn = document.getElementById("manualRefreshBtn");
         const attackWeekChart = document.getElementById("attackWeekChart");
         const attackTrendMeta = document.getElementById("attackTrendMeta");
+        const attackTrendDetails = document.getElementById("attackTrendDetails");
         const attackCurrentCount = document.getElementById("attackCurrentCount");
         const attackWeekCount = document.getElementById("attackWeekCount");
 
@@ -791,11 +877,12 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
             }
         }
 
-        function updateAttackActivity(series, labels, dates, latestType, currentCount, weekCount) {
+        function updateAttackActivity(series, labels, dates, latestType, latestDetails, currentCount, weekCount) {
             renderAttackWeek(series, labels, dates);
             attackCurrentCount.textContent = String(currentCount ?? 0);
             attackWeekCount.textContent = String(weekCount ?? 0);
             attackTrendMeta.textContent = `Latest: ${latestType || "No Recent Activity"}`;
+            attackTrendDetails.textContent = latestDetails || "No recent login details available.";
         }
 
         function updateDashboard(data) {
@@ -819,6 +906,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
                 data.attackLabels || [],
                 data.attackDates || [],
                 data.attackLatestType || "No Recent Activity",
+                data.attackLatestDetails || attackTrendDetails.textContent,
                 data.attackCurrentCount || 0,
                 data.attackWeekCount || 0
             );
@@ -967,6 +1055,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
             <?= json_encode($attackMetrics["labels"]) ?>,
             <?= json_encode($attackMetrics["dates"]) ?>,
             <?= json_encode($attackMetrics["latestType"]) ?>,
+            <?= json_encode($attackMetrics["latestDetails"]) ?>,
             <?= (int) $attackMetrics["currentCount"] ?>,
             <?= (int) $attackMetrics["weekCount"] ?>
         );
