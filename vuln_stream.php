@@ -9,10 +9,14 @@ header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 header("Expires: 0");
 
+date_default_timezone_set("America/Chicago");
+
 $userId = (int) ($_SESSION["user_id"] ?? 0);
 
 $kevUrl = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 $advisoriesUrl = "https://www.cisa.gov/news-events/cybersecurity-advisories";
+$sansFeedUrl = "https://isc.sans.edu/rssfeed_full.xml";
+$unit42Url = "https://unit42.paloaltonetworks.com/";
 
 function getThreatScore($count)
 {
@@ -148,6 +152,38 @@ function formatDateText(?string $raw): string
     return date("M j, Y", $ts);
 }
 
+function normalizeNewsDate(?string $value): int
+{
+    $value = trim((string) ($value ?? ""));
+    if ($value === "") {
+        return 0;
+    }
+
+    $ts = strtotime($value);
+    return $ts !== false ? $ts : 0;
+}
+
+function addNewsItem(array &$newsItems, array $item): void
+{
+    $title = trim((string) ($item["title"] ?? ""));
+    $link = trim((string) ($item["link"] ?? ""));
+
+    if ($title === "" || $link === "") {
+        return;
+    }
+
+    foreach ($newsItems as $existing) {
+        if (
+            trim((string) ($existing["title"] ?? "")) === $title ||
+            trim((string) ($existing["link"] ?? "")) === $link
+        ) {
+            return;
+        }
+    }
+
+    $newsItems[] = $item;
+}
+
 function extractPublishedDateFromHtml(string $html): string
 {
     if ($html === "") {
@@ -196,6 +232,97 @@ function extractPublishedDateFromHtml(string $html): string
     }
 
     return "";
+}
+
+function fetchSansNews(string $feedUrl): array
+{
+    $items = [];
+    $raw = fetchUrl($feedUrl);
+
+    if ($raw === false) {
+        return $items;
+    }
+
+    libxml_use_internal_errors(true);
+    $xml = simplexml_load_string($raw);
+
+    if ($xml === false || empty($xml->channel->item)) {
+        return $items;
+    }
+
+    foreach ($xml->channel->item as $entry) {
+        $title = trim((string) ($entry->title ?? ""));
+        $link = trim((string) ($entry->link ?? ""));
+        $dateText = trim((string) ($entry->pubDate ?? ""));
+        $description = trim(strip_tags((string) ($entry->description ?? "")));
+
+        if ($title === "" || $link === "") {
+            continue;
+        }
+
+        $items[] = [
+            "title" => $title,
+            "summary" => $description !== "" ? $description : "Latest update from SANS Internet Storm Center.",
+            "meta" => "Source: SANS ISC",
+            "date" => $dateText !== "" ? date("M j, Y", strtotime($dateText)) : "",
+            "link" => $link,
+            "timestamp" => normalizeNewsDate($dateText)
+        ];
+
+        if (count($items) >= 4) {
+            break;
+        }
+    }
+
+    return $items;
+}
+
+function fetchUnit42News(string $url): array
+{
+    $items = [];
+    $raw = fetchUrl($url);
+
+    if ($raw === false) {
+        return $items;
+    }
+
+    preg_match_all('/([A-Za-z]+\s+\d{1,2},\s+\d{4}).{0,250}?<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/is', $raw, $matches, PREG_SET_ORDER);
+
+    $seenLinks = [];
+
+    foreach ($matches as $match) {
+        $dateText = trim((string) ($match[1] ?? ""));
+        $href = html_entity_decode((string) ($match[2] ?? ""), ENT_QUOTES | ENT_HTML5);
+        $title = normalizeWhitespace(strip_tags((string) ($match[3] ?? "")));
+
+        if ($title === "" || $href === "" || $dateText === "") {
+            continue;
+        }
+
+        if (!str_starts_with($href, "http")) {
+            $href = "https://unit42.paloaltonetworks.com" . $href;
+        }
+
+        if (isset($seenLinks[$href])) {
+            continue;
+        }
+        $seenLinks[$href] = true;
+
+        $items[] = [
+            "title" => $title,
+            "summary" => "Latest threat research and intelligence from Palo Alto Networks Unit 42.",
+            "meta" => "Source: Unit 42",
+            "date" => formatDateText($dateText),
+            "link" => $href,
+            "timestamp" => normalizeNewsDate($dateText)
+        ];
+
+        if (count($items) >= 4) {
+            break;
+        }
+    }
+
+    return $items;
 }
 
 $recentVulns = [];
@@ -253,42 +380,36 @@ if ($rawAdvisories !== false) {
 
     preg_match_all('/<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/is', $rawAdvisories, $matches, PREG_SET_ORDER);
 
-    $seenLinks = [];
-
     foreach ($matches as $match) {
         $href = html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5);
-        $title = normalizeWhitespace(strip_tags($match[2]));
+        $title = trim(strip_tags($match[2]));
+        $dateText = "";
 
         if (
-            $title === "" ||
-            strlen($title) <= 18 ||
+            $title !== "" &&
+            strlen($title) > 18 &&
             (
-                !str_contains($href, "/news-events/alerts/") &&
-                !str_contains($href, "/news-events/cybersecurity-advisories/")
+                str_contains($href, "/news-events/alerts/") ||
+                str_contains($href, "/news-events/cybersecurity-advisories/")
             )
         ) {
-            continue;
+            if (!str_starts_with($href, "http")) {
+                $href = "https://www.cisa.gov" . $href;
+            }
+
+            if (preg_match('/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},\s+\d{4}/i', strip_tags($match[2]), $dateMatch)) {
+                $dateText = $dateMatch[0];
+            }
+
+            addNewsItem($newsItems, [
+                "title" => $title,
+                "summary" => "Live update from CISA Cybersecurity Alerts & Advisories.",
+                "meta" => "Source: CISA",
+                "date" => $dateText,
+                "link" => $href,
+                "timestamp" => normalizeNewsDate($dateText)
+            ]);
         }
-
-        if (!str_starts_with($href, "http")) {
-            $href = "https://www.cisa.gov" . $href;
-        }
-
-        if (isset($seenLinks[$href])) {
-            continue;
-        }
-        $seenLinks[$href] = true;
-
-        $articleHtml = fetchUrl($href);
-        $dateText = $articleHtml !== false ? extractPublishedDateFromHtml($articleHtml) : "";
-
-        $newsItems[] = [
-            "title" => $title,
-            "summary" => "Live update from CISA Cybersecurity Alerts & Advisories.",
-            "meta" => "Source: CISA",
-            "date" => $dateText,
-            "link" => $href
-        ];
 
         if (count($newsItems) >= 4) {
             break;
@@ -297,6 +418,33 @@ if ($rawAdvisories !== false) {
 } else {
     $feedError .= "Unable to load CISA advisories page. ";
 }
+
+$sansItems = fetchSansNews($sansFeedUrl);
+if (empty($sansItems)) {
+    $feedError .= "Unable to load SANS ISC feed. ";
+} else {
+    foreach ($sansItems as $item) {
+        addNewsItem($newsItems, $item);
+    }
+}
+
+$unit42Items = fetchUnit42News($unit42Url);
+if (empty($unit42Items)) {
+    $feedError .= "Unable to load Unit 42 updates. ";
+} else {
+    foreach ($unit42Items as $item) {
+        addNewsItem($newsItems, $item);
+    }
+}
+
+usort($newsItems, function ($a, $b) {
+    return ((int) ($b["timestamp"] ?? 0)) <=> ((int) ($a["timestamp"] ?? 0));
+});
+
+$newsItems = array_slice($newsItems, 0, 4);
+
+$feedOnline = $feedOnline || !empty($sansItems) || !empty($unit42Items);
+$advisoryOnline = $advisoryOnline || !empty($sansItems) || !empty($unit42Items);
 
 if (empty($recentVulns)) {
     $recentVulns = [
@@ -313,8 +461,8 @@ if (empty($newsItems)) {
     $newsItems = [
         [
             "title" => "Live security updates unavailable",
-            "summary" => "Live update from CISA Cybersecurity Alerts & Advisories.",
-            "meta" => "Source: CISA",
+            "summary" => "Could not load titled security updates right now.",
+            "meta" => "Fallback mode",
             "date" => "",
             "link" => "#"
         ]
@@ -335,7 +483,10 @@ if ($pdo instanceof PDO && $userId > 0) {
 }
 
 echo json_encode([
-    "newsItems" => $newsItems,
+    "newsItems" => array_map(function ($item) {
+        unset($item["timestamp"]);
+        return $item;
+    }, $newsItems),
     "recentVulns" => $recentVulns,
     "threatScore" => getThreatScore(count($recentVulns)),
     "alertCount" => count($recentVulns),
