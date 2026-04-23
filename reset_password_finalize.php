@@ -24,7 +24,6 @@ $message = "";
 $vaultPreserved = false;
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
-    $recoveryKeyInput = trim($_POST["recovery_key"] ?? "");
     $newPassword = $_POST["new_password"] ?? "";
     $confirmPassword = $_POST["confirm_password"] ?? "";
 
