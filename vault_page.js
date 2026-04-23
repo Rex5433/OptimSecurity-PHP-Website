@@ -78,6 +78,34 @@
     let selectedFolder = "__all__";
     let vaultKey = null;
 
+    const vaultUserKey =
+        document.querySelector(".vault-user-chip")?.textContent?.trim() || "vault_user";
+
+    function getFolderStorageKey() {
+        return `vault_folders_${vaultUserKey}`;
+    }
+
+    function loadSavedFolders() {
+        try {
+            const raw = localStorage.getItem(getFolderStorageKey());
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function saveSavedFolders(folders) {
+        try {
+            localStorage.setItem(
+                getFolderStorageKey(),
+                JSON.stringify(folders)
+            );
+        } catch (error) {
+            console.warn("Could not save folders to localStorage.", error);
+        }
+    }
+
     function setMessage(node, text, type = "error") {
         if (!node) return;
         node.textContent = text || "";
@@ -363,7 +391,7 @@
     }
 
     function updateKnownFolders() {
-        const folderSet = new Set();
+        const folderSet = new Set(loadSavedFolders());
 
         items.forEach((item) => {
             const folder = (item.folder_name || "").trim();
@@ -376,6 +404,7 @@
             selectedFolder = "__all__";
         }
 
+        saveSavedFolders(knownFolders);
         renderFolders();
         updateFolderOptions();
         updateStats();
@@ -455,6 +484,8 @@
                 selectedFolder = trimmed;
             }
 
+            saveSavedFolders(knownFolders.map((name) => name === oldFolderName ? trimmed : name));
+
             setMessage(pageMessage, `Folder renamed to "${trimmed}".`, "success");
             await loadItems();
         } catch (error) {
@@ -496,6 +527,8 @@
             if (selectedFolder === folderName) {
                 selectedFolder = "__all__";
             }
+
+            saveSavedFolders(knownFolders.filter((name) => name !== folderName));
 
             setMessage(pageMessage, `Folder "${folderName}" deleted.`, "success");
             await loadItems();
@@ -991,6 +1024,7 @@
             if (!knownFolders.includes(trimmed)) {
                 knownFolders.push(trimmed);
                 knownFolders.sort((a, b) => a.localeCompare(b));
+                saveSavedFolders(knownFolders);
             }
 
             selectedFolder = trimmed;
