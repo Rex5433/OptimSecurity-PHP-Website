@@ -25,7 +25,6 @@ if (
 }
 
 require_once "db.php";
-require_once __DIR__ . "/recovery_helpers.php";
 
 if (!$pdo) {
     http_response_code(500);
@@ -53,18 +52,13 @@ $vaultIterations = (int) ($body["vault_iterations"] ?? 0);
 $vaultKeyCheck = trim((string) ($body["vault_key_check"] ?? ""));
 $wrappedVaultKey = trim((string) ($body["wrapped_vault_key"] ?? ""));
 $wrappedVaultKeyIv = trim((string) ($body["wrapped_vault_key_iv"] ?? ""));
-$wrappedVaultKeyRecovery = trim((string) ($body["wrapped_vault_key_recovery"] ?? ""));
-$wrappedVaultKeyRecoveryIv = trim((string) ($body["wrapped_vault_key_recovery_iv"] ?? ""));
-$plainRecoveryKey = trim((string) ($body["plain_recovery_key"] ?? ""));
 
 if (
     $vaultSalt === "" ||
     $vaultIterations <= 0 ||
     $vaultKeyCheck === "" ||
     $wrappedVaultKey === "" ||
-    $wrappedVaultKeyIv === "" ||
-    $wrappedVaultKeyRecovery === "" ||
-    $wrappedVaultKeyRecoveryIv === ""
+    $wrappedVaultKeyIv === ""
 ) {
     http_response_code(400);
     echo json_encode([
@@ -80,54 +74,47 @@ try {
     $stmt = $pdo->prepare('
         INSERT INTO public.vault_profile (
             user_id,
+            vault_state,
+            vault_reset_at,
             vault_salt,
             vault_iterations,
             vault_key_check,
             wrapped_vault_key,
             wrapped_vault_key_iv,
-            wrapped_vault_key_recovery,
-            wrapped_vault_key_recovery_iv
+            updated_at
         )
         VALUES (
             :user_id,
+            :vault_state,
+            NULL,
             :vault_salt,
             :vault_iterations,
             :vault_key_check,
             :wrapped_vault_key,
             :wrapped_vault_key_iv,
-            :wrapped_vault_key_recovery,
-            :wrapped_vault_key_recovery_iv
+            NOW()
         )
         ON CONFLICT (user_id)
         DO UPDATE SET
+            vault_state = EXCLUDED.vault_state,
+            vault_reset_at = NULL,
             vault_salt = EXCLUDED.vault_salt,
             vault_iterations = EXCLUDED.vault_iterations,
             vault_key_check = EXCLUDED.vault_key_check,
             wrapped_vault_key = EXCLUDED.wrapped_vault_key,
             wrapped_vault_key_iv = EXCLUDED.wrapped_vault_key_iv,
-            wrapped_vault_key_recovery = EXCLUDED.wrapped_vault_key_recovery,
-            wrapped_vault_key_recovery_iv = EXCLUDED.wrapped_vault_key_recovery_iv,
             updated_at = NOW()
     ');
 
     $stmt->execute([
         'user_id' => $userId,
+        'vault_state' => 'active',
         'vault_salt' => $vaultSalt,
         'vault_iterations' => $vaultIterations,
         'vault_key_check' => $vaultKeyCheck,
         'wrapped_vault_key' => $wrappedVaultKey,
-        'wrapped_vault_key_iv' => $wrappedVaultKeyIv,
-        'wrapped_vault_key_recovery' => $wrappedVaultKeyRecovery,
-        'wrapped_vault_key_recovery_iv' => $wrappedVaultKeyRecoveryIv
+        'wrapped_vault_key_iv' => $wrappedVaultKeyIv
     ]);
-
-    if ($plainRecoveryKey !== "") {
-        $saved = upsertRecoveryKey($pdo, $userId, $plainRecoveryKey);
-
-        if (!$saved) {
-            throw new Exception("Could not sync account recovery key.");
-        }
-    }
 
     $pdo->commit();
 
