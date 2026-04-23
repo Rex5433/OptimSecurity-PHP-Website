@@ -26,13 +26,13 @@ try {
     $stmt = $pdo->prepare('
         SELECT
             user_id,
+            vault_state,
+            vault_reset_at,
             vault_salt,
             vault_iterations,
             vault_key_check,
             wrapped_vault_key,
-            wrapped_vault_key_iv,
-            wrapped_vault_key_recovery,
-            wrapped_vault_key_recovery_iv
+            wrapped_vault_key_iv
         FROM public.vault_profile
         WHERE user_id = :user_id
         LIMIT 1
