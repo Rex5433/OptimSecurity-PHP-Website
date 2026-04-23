@@ -108,7 +108,7 @@ $hasRecoveryKey = userHasRecoveryKey($pdo, $userId);
 $recoveryKeyCreatedAt = getRecoveryKeyCreatedAt($pdo, $userId);
 
 $vaultProfileStmt = $pdo->prepare('
-    SELECT id, wrapped_vault_key, wrapped_vault_key_iv
+    SELECT id, vault_state, wrapped_vault_key, wrapped_vault_key_iv
     FROM public.vault_profile
     WHERE user_id = :user_id
     LIMIT 1
@@ -116,6 +116,7 @@ $vaultProfileStmt = $pdo->prepare('
 $vaultProfileStmt->execute(['user_id' => $userId]);
 $vaultProfile = $vaultProfileStmt->fetch(PDO::FETCH_ASSOC);
 $vaultProfileExists = (bool) $vaultProfile;
+$vaultState = $vaultProfile["vault_state"] ?? "empty";
 
 $twofaRaw = $user["twofa_enabled"] ?? false;
 $twofaEnabled = (
@@ -293,6 +294,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 }
 
                 $message = $errorText;
+            } elseif ($vaultProfileExists && $vaultState === "active" && ($wrappedVaultKey === "" || $wrappedVaultKeyIv === "")) {
+                $errorText = "Vault re-encryption data is missing. Password was not changed.";
+
+                if ($isAjax) {
+                    json_response(["ok" => false, "error" => $errorText], 400);
+                }
+
+                $message = $errorText;
             } else {
                 try {
                     $pdo->beginTransaction();
@@ -309,18 +318,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         'id' => $userId
                     ]);
 
-                    if ($vaultProfileExists && $wrappedVaultKey !== "" && $wrappedVaultKeyIv !== "") {
+                    if ($vaultProfileExists && $vaultState === "active") {
                         $updateVaultProfile = $pdo->prepare('
                             UPDATE public.vault_profile
                             SET wrapped_vault_key = :wrapped_vault_key,
                                 wrapped_vault_key_iv = :wrapped_vault_key_iv,
                                 updated_at = NOW()
                             WHERE user_id = :user_id
+                              AND vault_state = :vault_state
                         ');
                         $updateVaultProfile->execute([
                             'wrapped_vault_key' => $wrappedVaultKey,
                             'wrapped_vault_key_iv' => $wrappedVaultKeyIv,
-                            'user_id' => $userId
+                            'user_id' => $userId,
+                            'vault_state' => 'active'
                         ]);
                     }
 
@@ -464,9 +475,7 @@ if ($activeTwofaSecret !== '') {
 <body class="vault-body">
     <div class="vault-shell">
         <aside class="vault-sidebar">
-            <div class="vault-sidebar-brand">
-                <img src="optimsecuritylogo.png" alt="Optimsecurity">
-            </div>
+            <div class="vault-sidebar-title">Dashboard</div>
             <nav class="vault-nav">
                 <a class="vault-nav-item" href="homepage.php">Home</a>
                 <a class="vault-nav-item" href="password_checker.php">Password Check</a>
@@ -721,13 +730,18 @@ if ($activeTwofaSecret !== '') {
             const wrappedVaultKeyInput = document.getElementById("wrapped_vault_key");
             const wrappedVaultKeyIvInput = document.getElementById("wrapped_vault_key_iv");
 
-            if (!form) return;
+            if (!form) {
+                return;
+            }
 
             form.addEventListener("submit", async (event) => {
                 event.preventDefault();
 
                 const currentPassword = currentPasswordInput.value || "";
                 const newPassword = newPasswordInput.value || "";
+
+                wrappedVaultKeyInput.value = "";
+                wrappedVaultKeyIvInput.value = "";
 
                 try {
                     const profileRes = await fetch("vault_profile.php", {
@@ -739,37 +753,31 @@ if ($activeTwofaSecret !== '') {
                     const raw = await profileRes.text();
                     const data = raw ? JSON.parse(raw) : {};
 
-                    if (data.exists && data.profile && window.VaultCrypto) {
-                        try {
-                            const rewrapped = await window.VaultCrypto.rewrapVaultKey(
-                                currentPassword,
-                                newPassword,
-                                data.profile
-                            );
-
-                            wrappedVaultKeyInput.value = rewrapped.wrapped_vault_key;
-                            wrappedVaultKeyIvInput.value = rewrapped.wrapped_vault_key_iv;
-                        } catch (vaultError) {
-                            wrappedVaultKeyInput.value = "";
-                            wrappedVaultKeyIvInput.value = "";
-                            console.warn("Vault re-wrap skipped:", vaultError);
+                    if (
+                        data.ok &&
+                        data.exists &&
+                        data.profile &&
+                        data.profile.vault_state === "active"
+                    ) {
+                        if (!window.VaultCrypto) {
+                            throw new Error("Vault crypto module missing.");
                         }
+
+                        const rewrapped = await window.VaultCrypto.rewrapVaultKey(
+                            currentPassword,
+                            newPassword,
+                            data.profile
+                        );
+
+                        wrappedVaultKeyInput.value = rewrapped.wrapped_vault_key;
+                        wrappedVaultKeyIvInput.value = rewrapped.wrapped_vault_key_iv;
                     }
 
-                    sessionStorage.removeItem("vault_login_password");
-                    sessionStorage.removeItem("vault_recovery_key");
-                    sessionStorage.removeItem("vault_new_recovery_key");
-
+                    sessionStorage.setItem("vault_login_password", newPassword);
                     form.submit();
                 } catch (error) {
-                    wrappedVaultKeyInput.value = "";
-                    wrappedVaultKeyIvInput.value = "";
-
-                    sessionStorage.removeItem("vault_login_password");
-                    sessionStorage.removeItem("vault_recovery_key");
-                    sessionStorage.removeItem("vault_new_recovery_key");
-
-                    form.submit();
+                    console.error("Vault password rewrap failed:", error);
+                    alert("Could not safely update vault encryption during password change. Password was not changed.");
                 }
             });
         })();
