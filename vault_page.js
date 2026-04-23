@@ -125,16 +125,6 @@
         return data;
     }
 
-    function getRecoveryKeyForVaultInit() {
-        const direct = sessionStorage.getItem("vault_recovery_key") || "";
-        if (direct) return direct;
-
-        const fromReset = sessionStorage.getItem("vault_new_recovery_key") || "";
-        if (fromReset) return fromReset;
-
-        return "";
-    }
-
     function profileHasRequiredFields(profile) {
         return !!(
             profile &&
@@ -148,95 +138,31 @@
         );
     }
 
-    async function saveVaultProfile(profilePayload) {
-        return apiFetch("vault_init.php", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(profilePayload)
-        });
-    }
-
     async function bootstrapVaultKey() {
         const password = sessionStorage.getItem("vault_login_password") || "";
+
         if (!password) {
-            throw new Error("No vault login password found in this browser session. Log in again.");
+            throw new Error("Vault session expired. Please log in again.");
         }
 
         const profileRes = await apiFetch("vault_profile.php");
 
         if (!profileRes.exists || !profileRes.profile) {
-            let recoveryKey = getRecoveryKeyForVaultInit();
-
-            if (!recoveryKey) {
-                recoveryKey = "vault-recovery-" + Math.random().toString(36).slice(2) + "-" + Date.now();
-                sessionStorage.setItem("vault_recovery_key", recoveryKey);
-                alert("Your vault recovery key is:\n\n" + recoveryKey + "\n\nSave this somewhere safe.");
-            }
-
-            const created = await window.VaultCrypto.createVaultProfile(password, recoveryKey);
-
-            await saveVaultProfile({
-                vault_salt: created.salt,
-                vault_iterations: created.iterations,
-                vault_key_check: created.vault_key_check,
-                wrapped_vault_key: created.wrapped_vault_key,
-                wrapped_vault_key_iv: created.wrapped_vault_key_iv,
-                wrapped_vault_key_recovery: created.wrapped_vault_key_recovery,
-                wrapped_vault_key_recovery_iv: created.wrapped_vault_key_recovery_iv,
-                plain_recovery_key: recoveryKey
-            });
-
-            vaultKey = created.vaultKey;
-            return;
+            throw new Error("Vault not initialized yet. Please create a new vault.");
         }
 
         const profile = profileRes.profile;
 
         if (!profileHasRequiredFields(profile)) {
-            throw new Error("Missing vault profile fields.");
+            throw new Error("Vault profile is incomplete.");
         }
 
         try {
             vaultKey = await window.VaultCrypto.unlockVaultFromProfile(password, profile);
-            return;
-        } catch (passwordError) {
-            const recoveryKey = getRecoveryKeyForVaultInit();
-
-            if (!recoveryKey) {
-                throw passwordError;
-            }
-
-            try {
-                vaultKey = await window.VaultCrypto.unlockVaultFromRecoveryKey(recoveryKey, profile);
-
-                const wrappedPassword = await window.VaultCrypto.rewrapVaultFromRecoveryToPassword(
-                    recoveryKey,
-                    password,
-                    profile
-                );
-
-                const wrappedRecovery = await window.VaultCrypto.rewrapVaultKeyWithRecovery(
-                    recoveryKey,
-                    recoveryKey,
-                    profile
-                );
-
-                await saveVaultProfile({
-                    vault_salt: profile.vault_salt,
-                    vault_iterations: profile.vault_iterations,
-                    vault_key_check: profile.vault_key_check,
-                    wrapped_vault_key: wrappedPassword.wrapped_vault_key,
-                    wrapped_vault_key_iv: wrappedPassword.wrapped_vault_key_iv,
-                    wrapped_vault_key_recovery: wrappedRecovery.wrapped_vault_key_recovery,
-                    wrapped_vault_key_recovery_iv: wrappedRecovery.wrapped_vault_key_recovery_iv,
-                    plain_recovery_key: recoveryKey
-                });
-
-                setMessage(pageMessage, "Vault access repaired using your recovery key.", "success");
-                return;
-            } catch (recoveryError) {
-                throw recoveryError;
-            }
+        } catch (error) {
+            throw new Error(
+                "Vault could not be unlocked with your current password. If you recently reset your password, your vault may need recovery."
+            );
         }
     }
 
@@ -561,7 +487,7 @@
 
                 decrypted.push({
                     id: row.id,
-                    item_name: row.item_name || fullItem.item_name || "Encrypted Item",
+                    item_name: row.id && row.item_name ? row.item_name : (fullItem.item_name || "Encrypted Item"),
                     item_type: row.item_type || fullItem.item_type || "login",
                     folder_name: row.folder_name || fullItem.folder_name || "",
                     payload: fullItem.payload || {}
@@ -771,17 +697,20 @@
 
     if (newItemBtn) newItemBtn.addEventListener("click", () => openItemModal(null));
     if (cancelItemBtn) cancelItemBtn.addEventListener("click", closeItemModal);
-    if (refreshBtn) refreshBtn.addEventListener("click", () => {
-        bootstrapVaultKey()
-            .then(loadItems)
-            .catch((error) => {
-                console.error(error);
-                setMessage(pageMessage, error.message || "Could not load vault items.", "error");
-                if (vaultList) {
-                    vaultList.innerHTML = `<div class="vault-empty">Could not load vault items.</div>`;
-                }
-            });
-    });
+    if (refreshBtn) {
+        refreshBtn.addEventListener("click", () => {
+            bootstrapVaultKey()
+                .then(loadItems)
+                .catch((error) => {
+                    console.error(error);
+                    setMessage(pageMessage, error.message || "Could not load vault items.", "error");
+                    if (vaultList) {
+                        vaultList.innerHTML = `<div class="vault-empty">Could not load vault items.</div>`;
+                    }
+                });
+        });
+    }
+
     if (searchInput) searchInput.addEventListener("input", renderItems);
 
     if (typeFilter) {
