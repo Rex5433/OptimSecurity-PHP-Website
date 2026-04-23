@@ -19,7 +19,9 @@ include "db.php";
 <body>
     <div class="page-wrapper">
         <aside class="sidebar">
-            <h2>Dashboard</h2>
+            <div class="sidebar-brand">
+                <img src="optimsecuritylogo.png" alt="Optimsecurity" class="sidebar-logo">
+            </div>
 
             <div class="sidebar-nav">
                 <a class="nav-link" href="homepage.php">Home</a>

@@ -33,10 +33,20 @@ body {
     top: 20px;
 }
 
-.sidebar h2 {
-    font-size: 21px;
-    font-weight: 800;
-    margin-bottom: 20px;
+.sidebar-brand {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 0 18px;
+    margin-bottom: 14px;
+}
+
+.sidebar-logo {
+    width: 165px;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
 }
 
 .nav-link {
@@ -347,5 +357,9 @@ body {
         padding: 11px 12px;
         min-height: 42px;
         margin-bottom: 8px;
+    }
+
+    .sidebar-brand {
+        justify-content: flex-start;
     }
 }
