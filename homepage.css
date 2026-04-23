@@ -1056,4 +1056,12 @@ body {
     .quick-tips-bar .refresh-btn {
         width: 100%;
     }
+
+    .dash-sidebar-title {
+    justify-content: flex-start;
+    }
+
+    .sidebar-logo {
+        width: 135px;
+    }
 }
