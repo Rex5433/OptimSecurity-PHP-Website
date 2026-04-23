@@ -489,7 +489,7 @@ $latestDetailLines = array_filter(array_map('trim', explode(' • ', (string) ($
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Homepage | Optimsecurity</title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="homepage.css?v=<?= filemtime('homepage.css') ?>">
+    <link rel="stylesheet" href="homepage.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
