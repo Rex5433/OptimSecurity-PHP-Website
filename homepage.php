@@ -333,16 +333,18 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
             return trim((string) $value) !== "";
         }));
 
+        $areaText = implode(", ", $cityRegionCountry);
+
         if ($location !== "") {
             $detailParts[] = "Location: " . $location;
         }
 
-        if (!empty($cityRegionCountry)) {
-            $detailParts[] = "Area: " . implode(", ", $cityRegionCountry);
+        if ($areaText !== "" && strtolower($areaText) !== strtolower($location)) {
+            $detailParts[] = "Area: " . $areaText;
         }
 
-        if ($location === "" && empty($cityRegionCountry)) {
-            $detailParts[] = "Location: Unknown";
+        if ($location === "" && $areaText === "") {
+            $detailParts[] = "Location data unavailable";
         }
 
         if (!empty($detailParts)) {
@@ -486,6 +488,8 @@ $threatScore = getThreatScore($alertCount);
 $passwordHealth = "Strong";
 $feedStatusText = ($feedOnline || $advisoryOnline || !empty($sansItems) || !empty($unit42Items)) ? "Live Feed Online" : "Feed Offline";
 $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !empty($unit42Items)) ? "live-status-bar" : "live-status-bar offline";
+
+$latestDetailLines = array_filter(array_map('trim', explode(' • ', (string) ($attackMetrics["latestDetails"] ?? ""))));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -503,6 +507,38 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
 
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="manifest" href="/site.webmanifest">
+    <style>
+        .attack-latest-wrap {
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .attack-latest-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #ffffff;
+            line-height: 1.2;
+        }
+
+        .attack-latest-details {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            width: 100%;
+        }
+
+        .attack-latest-line {
+            font-size: 16px;
+            font-weight: 600;
+            color: #ffffff;
+            line-height: 1.35;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+        }
+    </style>
 </head>
 
 <body class="dashboard-body">
@@ -610,8 +646,15 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
                         <div class="attack-latest-title" id="attackTrendMeta">
                             Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
                         </div>
+
                         <div class="attack-latest-details" id="attackTrendDetails">
-                            <?= htmlspecialchars($attackMetrics["latestDetails"]) ?>
+                            <?php if (!empty($latestDetailLines)): ?>
+                                <?php foreach ($latestDetailLines as $line): ?>
+                                    <div class="attack-latest-line"><?= htmlspecialchars($line) ?></div>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <div class="attack-latest-line">No recent login details available.</div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -885,12 +928,35 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
             }
         }
 
+        function renderAttackLatest(latestType, latestDetails) {
+            attackTrendMeta.textContent = `Latest: ${latestType || "No Recent Activity"}`;
+
+            const detailText = latestDetails || "No recent login details available.";
+            const detailLines = detailText.split("•").map(part => part.trim()).filter(Boolean);
+
+            attackTrendDetails.innerHTML = "";
+
+            if (!detailLines.length) {
+                const div = document.createElement("div");
+                div.className = "attack-latest-line";
+                div.textContent = "No recent login details available.";
+                attackTrendDetails.appendChild(div);
+                return;
+            }
+
+            detailLines.forEach(line => {
+                const div = document.createElement("div");
+                div.className = "attack-latest-line";
+                div.textContent = line;
+                attackTrendDetails.appendChild(div);
+            });
+        }
+
         function updateAttackActivity(series, labels, dates, latestType, latestDetails, currentCount, weekCount) {
             renderAttackWeek(series, labels, dates);
             attackCurrentCount.textContent = String(currentCount ?? 0);
             attackWeekCount.textContent = String(weekCount ?? 0);
-            attackTrendMeta.textContent = `Latest: ${latestType || "No Recent Activity"}`;
-            attackTrendDetails.textContent = latestDetails || "No recent login details available.";
+            renderAttackLatest(latestType, latestDetails);
         }
 
         function updateDashboard(data) {
@@ -914,7 +980,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
                 data.attackLabels || [],
                 data.attackDates || [],
                 data.attackLatestType || "No Recent Activity",
-                data.attackLatestDetails || attackTrendDetails.textContent,
+                data.attackLatestDetails || "",
                 data.attackCurrentCount || 0,
                 data.attackWeekCount || 0
             );
