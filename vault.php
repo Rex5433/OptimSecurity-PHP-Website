@@ -24,7 +24,7 @@ $username = $_SESSION["user_username"] ?? "user";
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vault | Security Dashboard</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
-    <link rel="stylesheet" href="vault.css?v=60">
+    <link rel="stylesheet" href="vault.css?v=50">
 </head>
 <body class="vault-body">
     <div class="vault-shell">
@@ -174,7 +174,8 @@ $username = $_SESSION["user_username"] ?? "user";
 
                     <div class="vault-form-group">
                         <label for="itemFolder">Folder</label>
-                        <input type="text" id="itemFolder" placeholder="Optional folder name">
+                        <input type="text" id="itemFolder" placeholder="Optional folder name" list="vaultFolderOptions">
+                        <datalist id="vaultFolderOptions"></datalist>
                     </div>
                 </div>
 
@@ -265,7 +266,7 @@ $username = $_SESSION["user_username"] ?? "user";
                         </div>
                     </div>
 
-                    <div class="vault-grid">
+                    <div class="vault-grid identity-grid-3">
                         <div class="vault-form-group">
                             <label for="identityFirstName">First Name</label>
                             <input type="text" id="identityFirstName">
@@ -306,7 +307,7 @@ $username = $_SESSION["user_username"] ?? "user";
                         </div>
                     </div>
 
-                    <div class="vault-grid">
+                    <div class="vault-grid identity-grid-4">
                         <div class="vault-form-group">
                             <label for="identityCity">City</label>
                             <input type="text" id="identityCity">
@@ -354,7 +355,7 @@ $username = $_SESSION["user_username"] ?? "user";
         </div>
     </div>
 
-    <script src="vault_crypto.js?v=200"></script>
-    <script src="vault_page.js?v=200"></script>
+    <script src="vault_crypto.js?v=100"></script>
+    <script src="vault_page.js?v=100"></script>
 </body>
 </html>
