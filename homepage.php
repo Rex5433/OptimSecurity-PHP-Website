@@ -606,11 +606,13 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
                         </div>
                     </div>
 
-                    <div class="chart-meta" id="attackTrendMeta">
-                        Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
-                    </div>
-                    <div class="chart-meta" id="attackTrendDetails" style="margin-top:10px; font-size:18px; font-weight:700;">
-                        <?= htmlspecialchars($attackMetrics["latestDetails"]) ?>
+                    <div class="attack-latest-wrap">
+                        <div class="attack-latest-title" id="attackTrendMeta">
+                            Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
+                        </div>
+                        <div class="attack-latest-details" id="attackTrendDetails">
+                            <?= htmlspecialchars($attackMetrics["latestDetails"]) ?>
+                        </div>
                     </div>
                 </div>
             </section>
