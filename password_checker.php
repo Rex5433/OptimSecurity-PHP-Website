@@ -155,7 +155,7 @@ if ($result) {
                                 <label for="password">Password</label>
 
                                 <span class="checker-char-count">
-                                    <span id="password-count"><?php echo strlen($passwordValue); ?></span>/128
+                                    <span id="password-count"><?php echo strlen($passwordValue); ?></span> characters long
                                 </span>
                             </div>
 
@@ -165,7 +165,6 @@ if ($result) {
                                 name="password"
                                 value="<?php echo htmlspecialchars($passwordValue); ?>"
                                 placeholder="Type a password here"
-                                maxlength="128"
                                 required
                             >
                         </div>
