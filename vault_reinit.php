@@ -40,16 +40,14 @@ $userId = (int) $_SESSION["user_id"];
 try {
     $pdo->beginTransaction();
 
-    // Delete old vault items for this user
     $deleteItemsStmt = $pdo->prepare('
-        DELETE FROM public.vault
-        WHERE userid = :user_id
+        DELETE FROM public.vault_items
+        WHERE user_id = :user_id
     ');
     $deleteItemsStmt->execute([
         'user_id' => $userId
     ]);
 
-    // Reset or create vault profile
     $profileCheckStmt = $pdo->prepare('
         SELECT user_id
         FROM public.vault_profile
@@ -73,12 +71,11 @@ try {
                 vault_key_check = NULL,
                 wrapped_vault_key = NULL,
                 wrapped_vault_key_iv = NULL,
-                wrapped_vault_key_recovery = NULL,
-                wrapped_vault_key_recovery_iv = NULL
+                updated_at = NOW()
             WHERE user_id = :user_id
         ');
         $resetProfileStmt->execute([
-            'vault_state' => 'active',
+            'vault_state' => 'empty',
             'user_id' => $userId
         ]);
     } else {
@@ -92,8 +89,7 @@ try {
                 vault_key_check,
                 wrapped_vault_key,
                 wrapped_vault_key_iv,
-                wrapped_vault_key_recovery,
-                wrapped_vault_key_recovery_iv
+                updated_at
             )
             VALUES (
                 :user_id,
@@ -104,13 +100,12 @@ try {
                 NULL,
                 NULL,
                 NULL,
-                NULL,
-                NULL
+                NOW()
             )
         ');
         $insertProfileStmt->execute([
             'user_id' => $userId,
-            'vault_state' => 'active'
+            'vault_state' => 'empty'
         ]);
     }
 
@@ -128,7 +123,8 @@ try {
     http_response_code(500);
     echo json_encode([
         "ok" => false,
-        "error" => "Could not create a new vault."
+        "error" => "Could not create a new vault.",
+        "debug" => $e->getMessage()
     ]);
     exit;
 }
