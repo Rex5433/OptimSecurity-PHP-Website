@@ -21,9 +21,6 @@ $userId = (int) $_SESSION["password_reset_user_id"];
 $username = (string) $_SESSION["password_reset_username"];
 
 $message = "";
-$success = "";
-$newRecoveryKeyToShow = "";
-$vaultPreserved = false;
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $recoveryKeyInput = trim($_POST["recovery_key"] ?? "");
@@ -51,6 +48,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $message = "Invalid recovery key.";
             } else {
                 $pdo->beginTransaction();
+
+                $userStmt = $pdo->prepare('
+                    SELECT id, username, name
+                    FROM "Accounts"
+                    WHERE id = :id
+                    LIMIT 1
+                ');
+                $userStmt->execute(['id' => $userId]);
+                $userRow = $userStmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$userRow) {
+                    throw new Exception("User not found during password reset.");
+                }
 
                 $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
 
@@ -83,10 +93,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 ]);
                 $vaultProfile = $vaultProfileStmt->fetch(PDO::FETCH_ASSOC);
 
-                if ($vaultProfile) {
-                    $vaultPreserved = true;
-                }
-
                 markRecoveryKeyUsed($pdo, $userId);
 
                 $newRecoveryKey = generateRecoveryKey();
@@ -96,26 +102,30 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     throw new Exception("Could not rotate recovery key.");
                 }
 
-                if ($vaultProfile) {
-                    $stmt = $pdo->prepare('
-                        UPDATE public.vault_profile
-                        SET updated_at = NOW()
-                        WHERE user_id = :user_id
-                    ');
-                    $stmt->execute([
-                        'user_id' => $userId
-                    ]);
+                $pdo->commit();
+
+                $displayName = trim((string) ($userRow["name"] ?? ""));
+                if ($displayName === "") {
+                    $displayName = (string) $userRow["username"];
                 }
 
-                $pdo->commit();
+                session_regenerate_id(true);
+
+                $_SESSION["user_id"] = (int) $userRow["id"];
+                $_SESSION["user_username"] = (string) $userRow["username"];
+                $_SESSION["user_name"] = $displayName;
+                $_SESSION["logged_in"] = true;
 
                 $_SESSION["password_reset_recovery_key"] = $recoveryKeyInput;
                 $_SESSION["password_reset_new_password"] = $newPassword;
                 $_SESSION["password_reset_new_recovery_key"] = $newRecoveryKey;
-                $_SESSION["password_reset_username_done"] = $username;
-                $_SESSION["password_reset_vault_preserved"] = $vaultPreserved ? "1" : "0";
+                $_SESSION["password_reset_username_done"] = (string) $userRow["username"];
+                $_SESSION["password_reset_vault_present"] = $vaultProfile ? "1" : "0";
 
-                unset($_SESSION["password_reset_user_id"], $_SESSION["password_reset_username"]);
+                unset(
+                    $_SESSION["password_reset_user_id"],
+                    $_SESSION["password_reset_username"]
+                );
 
                 header("Location: reset_password_finalize.php");
                 exit;
