@@ -293,14 +293,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 }
 
                 $message = $errorText;
-            } elseif ($vaultProfileExists && ($wrappedVaultKey === "" || $wrappedVaultKeyIv === "")) {
-                $errorText = "Vault re-wrap data is missing. Please try again.";
-
-                if ($isAjax) {
-                    json_response(["ok" => false, "error" => $errorText], 400);
-                }
-
-                $message = $errorText;
             } else {
                 try {
                     $pdo->beginTransaction();
@@ -317,7 +309,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         'id' => $userId
                     ]);
 
-                    if ($vaultProfileExists) {
+                    if ($vaultProfileExists && $wrappedVaultKey !== "" && $wrappedVaultKeyIv !== "") {
                         $updateVaultProfile = $pdo->prepare('
                             UPDATE public.vault_profile
                             SET wrapped_vault_key = :wrapped_vault_key,
@@ -745,21 +737,37 @@ if ($activeTwofaSecret !== '') {
                     const raw = await profileRes.text();
                     const data = raw ? JSON.parse(raw) : {};
 
-                    if (data.exists && data.profile) {
-                        const rewrapped = await window.VaultCrypto.rewrapVaultKey(
-                            currentPassword,
-                            newPassword,
-                            data.profile
-                        );
+                    if (data.exists && data.profile && window.VaultCrypto) {
+                        try {
+                            const rewrapped = await window.VaultCrypto.rewrapVaultKey(
+                                currentPassword,
+                                newPassword,
+                                data.profile
+                            );
 
-                        wrappedVaultKeyInput.value = rewrapped.wrapped_vault_key;
-                        wrappedVaultKeyIvInput.value = rewrapped.wrapped_vault_key_iv;
+                            wrappedVaultKeyInput.value = rewrapped.wrapped_vault_key;
+                            wrappedVaultKeyIvInput.value = rewrapped.wrapped_vault_key_iv;
+                        } catch (vaultError) {
+                            wrappedVaultKeyInput.value = "";
+                            wrappedVaultKeyIvInput.value = "";
+                            console.warn("Vault re-wrap skipped:", vaultError);
+                        }
                     }
 
-                    sessionStorage.setItem("vault_login_password", newPassword);
+                    sessionStorage.removeItem("vault_login_password");
+                    sessionStorage.removeItem("vault_recovery_key");
+                    sessionStorage.removeItem("vault_new_recovery_key");
+
                     form.submit();
                 } catch (error) {
-                    alert("Could not re-wrap vault key. Make sure your current password is correct and your vault profile is valid.");
+                    wrappedVaultKeyInput.value = "";
+                    wrappedVaultKeyIvInput.value = "";
+
+                    sessionStorage.removeItem("vault_login_password");
+                    sessionStorage.removeItem("vault_recovery_key");
+                    sessionStorage.removeItem("vault_new_recovery_key");
+
+                    form.submit();
                 }
             });
         })();
