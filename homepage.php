@@ -52,7 +52,7 @@ function getThreatScore($count)
 
 function getActionLabel($requiredAction)
 {
-    $action = strtolower((string) $requiredAction);
+    $action = strtolower((string) ($requiredAction));
 
     if (str_contains($action, "patch") || str_contains($action, "update")) {
         return "Patch Available";
@@ -319,24 +319,30 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
             }
         }
 
-        $city = trim((string) ($latestRow["city"] ?? ""));
-        $region = trim((string) ($latestRow["region"] ?? ""));
-        $country = trim((string) ($latestRow["country"] ?? ""));
-        $location = trim((string) ($latestRow["location"] ?? ""));
-
-        $locationParts = array_values(array_filter([$city, $region, $country], function ($value) {
-            return trim((string) $value) !== "";
-        }));
-
-        if (!empty($locationParts)) {
-            $detailParts[] = implode(", ", $locationParts);
-        } elseif ($location !== "") {
-            $detailParts[] = $location;
-        }
-
         $ipAddress = trim((string) ($latestRow["ip_address"] ?? ""));
         if ($ipAddress !== "") {
             $detailParts[] = "IP: " . $ipAddress;
+        }
+
+        $location = trim((string) ($latestRow["location"] ?? ""));
+        $city = trim((string) ($latestRow["city"] ?? ""));
+        $region = trim((string) ($latestRow["region"] ?? ""));
+        $country = trim((string) ($latestRow["country"] ?? ""));
+
+        $cityRegionCountry = array_values(array_filter([$city, $region, $country], function ($value) {
+            return trim((string) $value) !== "";
+        }));
+
+        if ($location !== "") {
+            $detailParts[] = "Location: " . $location;
+        }
+
+        if (!empty($cityRegionCountry)) {
+            $detailParts[] = "Area: " . implode(", ", $cityRegionCountry);
+        }
+
+        if ($location === "" && empty($cityRegionCountry)) {
+            $detailParts[] = "Location: Unknown";
         }
 
         if (!empty($detailParts)) {
@@ -603,7 +609,7 @@ $liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !emp
                     <div class="chart-meta" id="attackTrendMeta">
                         Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
                     </div>
-                    <div class="chart-meta" id="attackTrendDetails">
+                    <div class="chart-meta" id="attackTrendDetails" style="margin-top:10px; font-size:18px; font-weight:700;">
                         <?= htmlspecialchars($attackMetrics["latestDetails"]) ?>
                     </div>
                 </div>
