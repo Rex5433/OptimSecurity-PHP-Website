@@ -41,18 +41,17 @@ body.vault-body {
 
 .vault-sidebar-brand {
     display: flex;
+    justify-content: center;
     align-items: center;
-    justify-content: flex-start;
-    padding: 6px 4px 18px;
-    margin-bottom: 14px;
+    padding: 10px 0 22px;
+    margin-bottom: 10px;
 }
 
 .vault-sidebar-brand img {
-    width: 150px;
+    width: 145px;
     max-width: 100%;
     height: auto;
     display: block;
-    object-fit: contain;
 }
 
 .vault-nav {
