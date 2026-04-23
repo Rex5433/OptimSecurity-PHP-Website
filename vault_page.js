@@ -697,6 +697,7 @@
 
     if (newItemBtn) newItemBtn.addEventListener("click", () => openItemModal(null));
     if (cancelItemBtn) cancelItemBtn.addEventListener("click", closeItemModal);
+
     if (refreshBtn) {
         refreshBtn.addEventListener("click", () => {
             bootstrapVaultKey()
