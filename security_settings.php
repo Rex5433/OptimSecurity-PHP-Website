@@ -179,6 +179,31 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             }
         }
 
+        if ($action === "generate_new_twofa_secret") {
+            $newSecret = randomBase32Secret();
+
+            if ($twofaEnabled) {
+                $update = $pdo->prepare('
+                    UPDATE "Accounts"
+                    SET twofa_secret = :secret,
+                        twofa_created_at = NOW()
+                    WHERE id = :id
+                ');
+                $update->execute([
+                    'secret' => $newSecret,
+                    'id' => $userId
+                ]);
+
+                $success = "A new 2FA secret was generated. Scan the new QR code to update your authenticator app.";
+            } else {
+                $_SESSION["pending_twofa_secret"] = $newSecret;
+                $success = "A new 2FA secret was generated. Scan the new QR code below.";
+            }
+
+            header("Location: security_settings.php");
+            exit;
+        }
+
         if ($action === "generate_recovery_key") {
             $recoveryPassword = $_POST["recovery_password"] ?? "";
 
@@ -331,7 +356,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 try {
                     $pdo->beginTransaction();
 
-                    $deleteVault = $pdo->prepare('DELETE FROM public.vault_item WHERE user_id = :user_id');
+                    $deleteVault = $pdo->prepare('DELETE FROM public.vault_items WHERE user_id = :user_id');
                     $deleteVault->execute(['user_id' => $userId]);
 
                     $deleteProfile = $pdo->prepare('DELETE FROM public.vault_profile WHERE user_id = :user_id');
@@ -419,7 +444,7 @@ if ($activeTwofaSecret !== '') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Security Settings | Optimsecurity</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
-    <link rel="stylesheet" href="vault.css?v=30">
+    <link rel="stylesheet" href="vault.css?v=31">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -560,15 +585,20 @@ if ($activeTwofaSecret !== '') {
                         </p>
 
                         <?php if ($twofaEnabled): ?>
-                            <div class="vault-actions-row" style="justify-content:flex-start;">
+                            <div class="vault-actions-row" style="justify-content:flex-start; margin-top:20px;">
                                 <a href="disable_2fa.php" class="vault-primary-btn">Disable 2FA</a>
+
+                                <form method="post" style="display:inline;">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
+                                    <input type="hidden" name="action" value="generate_new_twofa_secret">
+                                    <button type="submit" class="vault-secondary-btn">Generate New Secret</button>
+                                </form>
                             </div>
 
                             <?php if ($qrUrl !== ''): ?>
                                 <div style="margin-top:20px;">
                                     <p style="color:#9bb3c3; margin-bottom:14px;">
-                                        Scan this QR code in Microsoft Authenticator or Google Authenticator to add this account
-                                        again on another device.
+                                        Scan this QR code in Microsoft Authenticator or Google Authenticator to add this account again on another device.
                                     </p>
 
                                     <div style="display:flex; justify-content:center; align-items:center; background:#041c2b; border:1px solid #25475b; border-radius:16px; padding:18px;">
