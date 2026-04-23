@@ -151,13 +151,21 @@ if ($result) {
 
                     <form method="POST" class="checker-form">
                         <div class="checker-form-group">
-                            <label for="password">Password</label>
+                            <div class="checker-label-row">
+                                <label for="password">Password</label>
+
+                                <span class="checker-char-count">
+                                    <span id="password-count"><?php echo strlen($passwordValue); ?></span>/128
+                                </span>
+                            </div>
+
                             <input
                                 type="text"
                                 id="password"
                                 name="password"
                                 value="<?php echo htmlspecialchars($passwordValue); ?>"
                                 placeholder="Type a password here"
+                                maxlength="128"
                                 required
                             >
                         </div>
@@ -250,5 +258,16 @@ if ($result) {
             </section>
         </main>
     </div>
+
+    <script>
+        const passwordInput = document.getElementById("password");
+        const passwordCount = document.getElementById("password-count");
+
+        if (passwordInput && passwordCount) {
+            passwordInput.addEventListener("input", () => {
+                passwordCount.textContent = passwordInput.value.length;
+            });
+        }
+    </script>
 </body>
 </html>
