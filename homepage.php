@@ -333,22 +333,12 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
             return trim((string) $value) !== "";
         }));
 
-        $areaText = implode(", ", $cityRegionCountry);
-
         if ($location !== "") {
             $detailParts[] = "Location: " . $location;
-        }
-
-        if ($areaText !== "" && strtolower($areaText) !== strtolower($location)) {
-             $detailParts[] = "Area: " . $areaText;
-         }
-
-        if ($location === "" && $areaText === "") {
+        } elseif (!empty($cityRegionCountry)) {
+            $detailParts[] = "Location: " . implode(", ", $cityRegionCountry);
+        } else {
             $detailParts[] = "Location data unavailable";
-        }
-
-        if (!empty($detailParts)) {
-            $latestDetails = implode(" • ", $detailParts);
         }
     }
 
