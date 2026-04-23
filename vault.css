@@ -39,6 +39,21 @@ body.vault-body {
     margin-bottom: 20px;
 }
 
+.vault-sidebar-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+.vault-sidebar-brand img {
+    width: 170px;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
+}
+
 .vault-nav {
     display: flex;
     flex-direction: column;
