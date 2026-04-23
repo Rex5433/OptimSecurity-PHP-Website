@@ -11,11 +11,12 @@ if (!isset($_SESSION["user_id"])) {
 }
 
 $username = $_SESSION["password_reset_username_done"] ?? ($_SESSION["user_username"] ?? "user");
+$oldRecoveryKey = $_SESSION["password_reset_recovery_key"] ?? "";
 $newPassword = $_SESSION["password_reset_new_password"] ?? "";
 $newRecoveryKey = $_SESSION["password_reset_new_recovery_key"] ?? "";
 $vaultPresent = ($_SESSION["password_reset_vault_present"] ?? "0") === "1";
 
-if ($newRecoveryKey === "" || $newPassword === "" || $recoveryKey === "") {
+if ($newPassword === "" || $oldRecoveryKey === "") {
     header("Location: security_settings.php");
     exit;
 }
@@ -29,7 +30,7 @@ if (empty($_SESSION["csrf_token"])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Finalize Password Reset | Optimsecurity</title>
+    <title>Password Reset Complete | Optimsecurity</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
@@ -49,13 +50,8 @@ if (empty($_SESSION["csrf_token"])) {
 
             <div id="statusBox" class="login-error" style="display:none;"></div>
 
-            <div class="form-group">
-                <label>New Recovery Key</label>
-                <input type="text" value="<?= htmlspecialchars($newRecoveryKey) ?>" readonly>
-            </div>
-
-            <p class="bottom-link" style="margin-top: 14px;">
-                Save this new recovery key now. It replaces the old one.
+            <p class="bottom-link" style="margin-top: 14px; margin-bottom: 18px;">
+                Your password has been updated. Continue back to the vault.
             </p>
 
             <form id="continueForm" action="vault.php" method="get">
@@ -69,7 +65,7 @@ if (empty($_SESSION["csrf_token"])) {
         (async function () {
             const statusBox = document.getElementById("statusBox");
             const vaultPresent = <?= $vaultPresent ? "true" : "false" ?>;
-            const oldRecoveryKey = <?= json_encode($recoveryKey) ?>;
+            const oldRecoveryKey = <?= json_encode($oldRecoveryKey) ?>;
             const newPassword = <?= json_encode($newPassword) ?>;
             const newRecoveryKey = <?= json_encode($newRecoveryKey) ?>;
             const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
@@ -82,10 +78,13 @@ if (empty($_SESSION["csrf_token"])) {
 
             try {
                 sessionStorage.setItem("vault_login_password", newPassword);
-                sessionStorage.setItem("vault_recovery_key", newRecoveryKey);
 
-                if (!vaultPresent) {
-                    showStatus("Password reset complete. No vault re-wrap was needed.");
+                if (newRecoveryKey) {
+                    sessionStorage.setItem("vault_recovery_key", newRecoveryKey);
+                }
+
+                if (!vaultPresent || !newRecoveryKey) {
+                    showStatus("Password reset complete.");
                     return;
                 }
 
@@ -103,11 +102,6 @@ if (empty($_SESSION["csrf_token"])) {
                 }
 
                 const profile = profileData.profile;
-
-                const vaultKey = await window.VaultCrypto.unlockVaultFromRecoveryKey(
-                    oldRecoveryKey,
-                    profile
-                );
 
                 const wrappedPassword = await window.VaultCrypto.rewrapVaultFromRecoveryToPassword(
                     oldRecoveryKey,
@@ -148,7 +142,7 @@ if (empty($_SESSION["csrf_token"])) {
                 showStatus("Password reset complete. Vault access was preserved.");
             } catch (error) {
                 showStatus(
-                    "Password reset worked, but vault re-wrap failed. Try logging in and regenerating access, or retry this flow. " +
+                    "Password reset complete, but vault re-wrap failed. " +
                     (error?.message ? "Details: " + error.message : ""),
                     true
                 );
