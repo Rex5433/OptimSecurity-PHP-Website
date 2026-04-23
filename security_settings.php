@@ -1,6 +1,8 @@
 <?php
 session_start();
 
+date_default_timezone_set("America/Chicago");
+
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 header("Expires: 0");
@@ -43,6 +45,21 @@ function json_response(array $payload, int $status = 200): void
     header("Content-Type: application/json");
     echo json_encode($payload);
     exit;
+}
+
+function formatAppDate(?string $value, string $fallback = "Not Set"): string
+{
+    if (!$value) {
+        return $fallback;
+    }
+
+    try {
+        $dt = new DateTime($value);
+        $dt->setTimezone(new DateTimeZone("America/Chicago"));
+        return $dt->format("M j, Y");
+    } catch (Throwable $e) {
+        return $fallback;
+    }
 }
 
 $username = $_SESSION["user_username"] ?? "user";
@@ -444,7 +461,7 @@ if ($activeTwofaSecret !== '') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Security Settings | Optimsecurity</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
-    <link rel="stylesheet" href="vault.css?v=31">
+    <link rel="stylesheet" href="vault.css?v=32">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -515,11 +532,7 @@ if ($activeTwofaSecret !== '') {
 
                     <div class="vault-stat-card">
                         <span class="vault-stat-label">2FA Enabled On</span>
-                        <span class="vault-stat-value">
-                            <?= !empty($user["twofa_created_at"])
-                                ? date("M j, Y", strtotime($user["twofa_created_at"]))
-                                : "Not Set" ?>
-                        </span>
+                        <span class="vault-stat-value"><?= formatAppDate($user["twofa_created_at"] ?? null) ?></span>
                     </div>
                 </div>
 
@@ -554,9 +567,7 @@ if ($activeTwofaSecret !== '') {
 
                         <div class="vault-stat-card">
                             <span class="vault-stat-label">Last Generated</span>
-                            <span class="vault-stat-value">
-                                <?= $recoveryKeyCreatedAt ? date("M j, Y", strtotime($recoveryKeyCreatedAt)) : "Never" ?>
-                            </span>
+                            <span class="vault-stat-value"><?= $recoveryKeyCreatedAt ? formatAppDate($recoveryKeyCreatedAt, "Never") : "Never" ?></span>
                         </div>
                     </div>
 
