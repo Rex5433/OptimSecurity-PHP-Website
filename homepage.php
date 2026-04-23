@@ -6,6 +6,8 @@ header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 header("Expires: 0");
 
+date_default_timezone_set("America/Chicago");
+
 if (!isset($_SESSION["user_id"])) {
     header("Location: login.php");
     exit;
