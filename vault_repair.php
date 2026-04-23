@@ -196,6 +196,7 @@ $username = $_SESSION["user_username"] ?? "user";
 
                 sessionStorage.setItem("vault_login_password", currentPassword);
                 sessionStorage.setItem("vault_recovery_key", newRecoveryKey);
+                sessionStorage.removeItem("vault_new_recovery_key");
 
                 showStatus("Vault repaired successfully. Redirecting...");
                 setTimeout(() => {
