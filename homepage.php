@@ -632,10 +632,10 @@ $latestDetailLines = array_filter(array_map('trim', explode(' • ', (string) ($
                         </div>
                     </div>
 
-                    <div class="attack-latest-card">
-                        <span class="attack-mini-label">
+                    <div class="attack-latest-wrap">
+                        <div class="attack-latest-title" id="attackTrendMeta">
                             Latest: <?= htmlspecialchars($attackMetrics["latestType"]) ?>
-                        </span>
+                        </div>
 
                         <div class="attack-latest-details" id="attackTrendDetails">
                             <?php if (!empty($latestDetailLines)): ?>

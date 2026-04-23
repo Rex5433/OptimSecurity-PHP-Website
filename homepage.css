@@ -366,28 +366,6 @@ body {
     color: #2de7bb;
 }
 
-.attack-latest-card {
-    background: rgba(2, 37, 60, 0.9);
-    border: 1px solid rgba(60, 126, 160, 0.35);
-    border-radius: 14px;
-    padding: 18px 20px;
-    margin-top: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.attack-latest-card .attack-latest-details {
-    gap: 10px;
-}
-
-.attack-latest-card .attack-latest-line {
-    font-size: 15px;
-    font-weight: 600;
-    color: #ffffff;
-    line-height: 1.45;
-}
-
 .attack-latest-wrap {
     margin-top: 14px;
     padding-top: 4px;
