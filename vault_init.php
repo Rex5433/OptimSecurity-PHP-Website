@@ -25,6 +25,7 @@ if (
 }
 
 require_once "db.php";
+require_once __DIR__ . "/recovery_helpers.php";
 
 if (!$pdo) {
     http_response_code(500);
@@ -54,6 +55,7 @@ $wrappedVaultKey = trim((string) ($body["wrapped_vault_key"] ?? ""));
 $wrappedVaultKeyIv = trim((string) ($body["wrapped_vault_key_iv"] ?? ""));
 $wrappedVaultKeyRecovery = trim((string) ($body["wrapped_vault_key_recovery"] ?? ""));
 $wrappedVaultKeyRecoveryIv = trim((string) ($body["wrapped_vault_key_recovery_iv"] ?? ""));
+$plainRecoveryKey = trim((string) ($body["plain_recovery_key"] ?? ""));
 
 if (
     $vaultSalt === "" ||
@@ -73,6 +75,8 @@ if (
 }
 
 try {
+    $pdo->beginTransaction();
+
     $stmt = $pdo->prepare('
         INSERT INTO public.vault_profile (
             user_id,
@@ -117,10 +121,24 @@ try {
         'wrapped_vault_key_recovery_iv' => $wrappedVaultKeyRecoveryIv
     ]);
 
+    if ($plainRecoveryKey !== "") {
+        $saved = upsertRecoveryKey($pdo, $userId, $plainRecoveryKey);
+
+        if (!$saved) {
+            throw new Exception("Could not sync account recovery key.");
+        }
+    }
+
+    $pdo->commit();
+
     echo json_encode([
         "ok" => true
     ]);
 } catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
     http_response_code(500);
     echo json_encode([
         "ok" => false,
