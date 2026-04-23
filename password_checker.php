@@ -111,7 +111,9 @@ if ($result) {
 <body class="checker-body">
     <div class="checker-shell">
         <aside class="checker-sidebar">
-            <div class="checker-sidebar-title">Dashboard</div>
+            <div class="checker-sidebar-title">
+                <img src="optimsecuritylogo.png" alt="Optimsecurity" class="checker-sidebar-logo">
+            </div>
 
             <nav class="checker-nav">
                 <a href="homepage.php" class="checker-nav-item">Home</a>
