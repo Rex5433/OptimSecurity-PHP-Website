@@ -188,7 +188,7 @@ if ($rawAdvisories !== false) {
             ];
         }
 
-        if (count($newsItems) >= 3) {
+        if (count($newsItems) >= 4) {
             break;
         }
     }
