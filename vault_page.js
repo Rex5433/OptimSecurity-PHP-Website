@@ -119,31 +119,15 @@
         return data;
     }
 
-    function profileHasRequiredFields(profile) {
-        return !!(
-            profile &&
-            profile.vault_salt &&
-            profile.vault_iterations &&
-            profile.vault_key_check &&
-            profile.wrapped_vault_key &&
-            profile.wrapped_vault_key_iv
-        );
-    }
-
-    function getStoredPassword() {
-        return sessionStorage.getItem("vault_login_password") || "";
-    }
-
     async function bootstrapVaultKey() {
-        const password = getStoredPassword();
-
+        const password = sessionStorage.getItem("vault_login_password") || "";
         if (!password) {
-            throw new Error("Vault session expired. Please log in again.");
+            throw new Error("No vault login password found in this browser session. Log in again.");
         }
 
         const profileRes = await apiFetch("vault_profile.php");
 
-        if (!profileRes.exists || !profileRes.profile || !profileHasRequiredFields(profileRes.profile)) {
+        if (!profileRes.exists || !profileRes.profile) {
             const created = await window.VaultCrypto.createVaultProfile(password);
 
             await apiFetch("vault_init.php", {
@@ -159,7 +143,6 @@
             });
 
             vaultKey = created.vaultKey;
-            setMessage(pageMessage, "Vault initialized successfully.", "success");
             return;
         }
 
@@ -184,6 +167,7 @@
         loginUrl.value = "";
         loginTotp.value = "";
         loginNotes.value = "";
+
         cardholderName.value = "";
         cardBrand.value = "";
         cardNumber.value = "";
@@ -191,6 +175,7 @@
         cardExpYear.value = "";
         cardCvc.value = "";
         cardNotes.value = "";
+
         identityTitle.value = "";
         identityCompany.value = "";
         identityFirstName.value = "";
@@ -205,6 +190,7 @@
         identityPostalCode.value = "";
         identityCountry.value = "";
         identityNotes.value = "";
+
         noteTitle.value = "";
         noteContent.value = "";
     }
@@ -470,10 +456,6 @@
     async function loadItems() {
         clearMessage(pageMessage);
 
-        if (!vaultKey) {
-            throw new Error("Vault is locked.");
-        }
-
         const data = await apiFetch("vault_list.php");
         const decrypted = [];
 
@@ -484,7 +466,7 @@
 
                 decrypted.push({
                     id: row.id,
-                    item_name: row.id && row.item_name ? row.item_name : (fullItem.item_name || "Encrypted Item"),
+                    item_name: row.item_name || fullItem.item_name || "Encrypted Item",
                     item_type: row.item_type || fullItem.item_type || "login",
                     folder_name: row.folder_name || fullItem.folder_name || "",
                     payload: fullItem.payload || {}
@@ -555,97 +537,130 @@
                 throw new Error("Item name is required.");
             }
 
+            if (!fullItem.item_type) {
+                throw new Error("Item type is required.");
+            }
+
             const encrypted = await window.VaultCrypto.encryptText(
                 vaultKey,
                 JSON.stringify(fullItem)
             );
+
+            if (!encrypted || !encrypted.encrypted_data || !encrypted.iv) {
+                throw new Error("Encryption failed before save.");
+            }
+
+            const requestBody = {
+                item_id: itemId.value ? Number(itemId.value) : 0,
+                item_name: fullItem.item_name,
+                item_type: fullItem.item_type,
+                folder_name: fullItem.folder_name,
+                encrypted_data: encrypted.encrypted_data,
+                iv: encrypted.iv
+            };
+
+            console.log("vault save requestBody =", requestBody);
 
             await apiFetch("vault_save.php", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({
-                    item_id: itemId.value ? Number(itemId.value) : 0,
-                    item_name: fullItem.item_name,
-                    item_type: fullItem.item_type,
-                    folder_name: fullItem.folder_name,
-                    encrypted_data: encrypted.encrypted_data,
-                    iv: encrypted.iv
-                })
+                body: JSON.stringify(requestBody)
             });
 
             closeItemModal();
             setMessage(pageMessage, "Vault item saved successfully.", "success");
             await loadItems();
         } catch (error) {
+            console.error("vault save error:", error);
             setMessage(itemMessage, error.message || "Could not save vault item.", "error");
         }
     });
 
-    if (vaultList) {
-        vaultList.addEventListener("click", async (event) => {
-            const editId = event.target.getAttribute("data-edit");
-            const copyId = event.target.getAttribute("data-copy");
-            const deleteId = event.target.getAttribute("data-delete");
+    vaultList.addEventListener("click", async (event) => {
+        const editId = event.target.getAttribute("data-edit");
+        const copyId = event.target.getAttribute("data-copy");
+        const deleteId = event.target.getAttribute("data-delete");
 
-            if (editId) {
-                const existing = items.find((item) => String(item.id) === String(editId));
-                if (existing) openItemModal(existing);
+        if (editId) {
+            const existing = items.find((item) => String(item.id) === String(editId));
+            if (existing) openItemModal(existing);
+            return;
+        }
+
+        if (copyId) {
+            const existing = items.find((item) => String(item.id) === String(copyId));
+            if (!existing) return;
+
+            let copyValue = "";
+
+            if (existing.item_type === "login") copyValue = existing.payload?.password || "";
+            else if (existing.item_type === "card") copyValue = existing.payload?.card_number || "";
+            else if (existing.item_type === "identity") copyValue = existing.payload?.email || "";
+            else if (existing.item_type === "note") copyValue = existing.payload?.note_content || "";
+
+            if (!copyValue) {
+                setMessage(pageMessage, "Nothing to copy for this item.", "error");
                 return;
             }
 
-            if (copyId) {
-                const existing = items.find((item) => String(item.id) === String(copyId));
-                if (!existing) return;
-
-                let copyValue = "";
-
-                if (existing.item_type === "login") copyValue = existing.payload?.password || "";
-                else if (existing.item_type === "card") copyValue = existing.payload?.card_number || "";
-                else if (existing.item_type === "identity") copyValue = existing.payload?.email || "";
-                else if (existing.item_type === "note") copyValue = existing.payload?.note_content || "";
-
-                if (!copyValue) {
-                    setMessage(pageMessage, "Nothing to copy for this item.", "error");
-                    return;
-                }
-
-                try {
+            try {
+                if (
+                    navigator.clipboard &&
+                    (window.isSecureContext ||
+                        window.location.hostname === "localhost" ||
+                        window.location.hostname === "127.0.0.1")
+                ) {
                     await navigator.clipboard.writeText(copyValue);
-                    setMessage(pageMessage, "Copied to clipboard.", "success");
-                } catch (error) {
-                    setMessage(pageMessage, "Could not copy item value.", "error");
+                } else {
+                    const temp = document.createElement("textarea");
+                    temp.value = copyValue;
+                    temp.setAttribute("readonly", "");
+                    temp.style.position = "fixed";
+                    temp.style.left = "-9999px";
+                    document.body.appendChild(temp);
+                    temp.focus();
+                    temp.select();
+
+                    const copied = document.execCommand("copy");
+                    document.body.removeChild(temp);
+
+                    if (!copied) {
+                        throw new Error("Fallback copy failed.");
+                    }
                 }
 
-                return;
+                setMessage(pageMessage, "Copied to clipboard.", "success");
+            } catch (error) {
+                setMessage(pageMessage, "Could not copy item value.", "error");
             }
 
-            if (deleteId) {
-                const okToDelete = window.confirm("Delete this vault item?");
-                if (!okToDelete) return;
+            return;
+        }
 
-                try {
-                    await apiFetch("vault_delete.php", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ item_id: Number(deleteId) })
-                    });
+        if (deleteId) {
+            const okToDelete = window.confirm("Delete this vault item?");
+            if (!okToDelete) return;
 
-                    setMessage(pageMessage, "Vault item deleted.", "success");
-                    await loadItems();
-                } catch (error) {
-                    setMessage(pageMessage, error.message || "Delete failed.", "error");
-                }
+            try {
+                await apiFetch("vault_delete.php", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ item_id: Number(deleteId) })
+                });
+
+                setMessage(pageMessage, "Vault item deleted.", "success");
+                await loadItems();
+            } catch (error) {
+                setMessage(pageMessage, error.message || "Delete failed.", "error");
             }
-        });
-    }
+        }
+    });
 
     if (newItemBtn) newItemBtn.addEventListener("click", () => openItemModal(null));
     if (cancelItemBtn) cancelItemBtn.addEventListener("click", closeItemModal);
-    if (refreshBtn) refreshBtn.addEventListener("click", () => bootstrapVaultKey().then(loadItems).catch((error) => {
-        setMessage(pageMessage, error.message || "Could not load vault items.", "error");
-    }));
+    if (refreshBtn) refreshBtn.addEventListener("click", loadItems);
     if (searchInput) searchInput.addEventListener("input", renderItems);
 
     if (typeFilter) {
@@ -688,6 +703,28 @@
             renderItems();
         });
     });
+
+    if (newFolderBtn) {
+        newFolderBtn.addEventListener("click", () => {
+            const folderName = window.prompt("Enter a new folder name:");
+            if (!folderName) return;
+
+            const trimmed = folderName.trim();
+            if (!trimmed) return;
+
+            if (!knownFolders.includes(trimmed)) {
+                knownFolders.push(trimmed);
+                knownFolders.sort((a, b) => a.localeCompare(b));
+            }
+
+            selectedFolder = trimmed;
+            updateFolderFilterButtons();
+            renderFolders();
+            updateStats();
+
+            if (itemFolder) itemFolder.value = trimmed;
+        });
+    }
 
     updateTypeFilterButtons();
     updateFolderFilterButtons();
