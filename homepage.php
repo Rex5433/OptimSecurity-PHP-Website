@@ -1173,7 +1173,7 @@ $latestDetailLines = array_filter(array_map('trim', explode(' • ', (string) ($
         }
 
         function loadDefaultTips() {
-            const tips = shuffleArray(getCurrentTips()).slice(0, 3);
+            const tips = shuffleArray(getCurrentTips()).slice(0, 8);
             renderTips(tips);
         }
 
