@@ -51,7 +51,7 @@ include "db.php";
                 <div class="generator-card">
                     <div class="generator-card-header">
                         <h2>Generator Settings</h2>
-                        <p>Keep the design the same while sending settings that match the FastAPI backend.</p>
+                        <p>The closer your keyword length is to your password length, the better this tool will be at making your passwords memorable.</p>
                     </div>
 
                     <form class="generator-form" id="generatorForm">
