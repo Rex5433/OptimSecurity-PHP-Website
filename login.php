@@ -34,8 +34,154 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     );
 }
 
+function getClientIpAddress(): string
+{
+    $candidates = [
+        $_SERVER["HTTP_CF_CONNECTING_IP"] ?? "",
+        $_SERVER["HTTP_X_REAL_IP"] ?? "",
+        $_SERVER["HTTP_X_FORWARDED_FOR"] ?? "",
+        $_SERVER["REMOTE_ADDR"] ?? ""
+    ];
+
+    foreach ($candidates as $candidate) {
+        $candidate = trim((string) $candidate);
+        if ($candidate === "") {
+            continue;
+        }
+
+        if (str_contains($candidate, ",")) {
+            $parts = explode(",", $candidate);
+            $candidate = trim((string) ($parts[0] ?? ""));
+        }
+
+        if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+            return $candidate;
+        }
+    }
+
+    return "";
+}
+
+function fetchGeoDataForIp(string $ipAddress): array
+{
+    $empty = [
+        "location" => "",
+        "city" => "",
+        "region" => "",
+        "country" => ""
+    ];
+
+    $ipAddress = trim($ipAddress);
+    if ($ipAddress === "") {
+        return $empty;
+    }
+
+    if ($ipAddress === "::1" || $ipAddress === "127.0.0.1") {
+        return [
+            "location" => "Localhost",
+            "city" => "Localhost",
+            "region" => "Localhost",
+            "country" => "Localhost"
+        ];
+    }
+
+    if (
+        filter_var($ipAddress, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false
+    ) {
+        return [
+            "location" => "Private Network",
+            "city" => "",
+            "region" => "",
+            "country" => ""
+        ];
+    }
+
+    $url = "http://ip-api.com/json/" . rawurlencode($ipAddress) . "?fields=status,message,country,regionName,city,query";
+    $context = stream_context_create([
+        "http" => [
+            "method" => "GET",
+            "timeout" => 4,
+            "header" => "User-Agent: Optimsecurity/1.0\r\n"
+        ]
+    ]);
+
+    $raw = @file_get_contents($url, false, $context);
+    if ($raw === false) {
+        return $empty;
+    }
+
+    $data = json_decode($raw, true);
+    if (!is_array($data) || ($data["status"] ?? "") !== "success") {
+        return $empty;
+    }
+
+    $city = trim((string) ($data["city"] ?? ""));
+    $region = trim((string) ($data["regionName"] ?? ""));
+    $country = trim((string) ($data["country"] ?? ""));
+
+    $locationParts = array_values(array_filter([$city, $region, $country], function ($value) {
+        return trim((string) $value) !== "";
+    }));
+
+    return [
+        "location" => !empty($locationParts) ? implode(", ", $locationParts) : "",
+        "city" => $city,
+        "region" => $region,
+        "country" => $country
+    ];
+}
+
+function enrichLatestLoginActivity(PDO $pdo, ?int $userId, string $eventType): void
+{
+    if (!$pdo || !$userId || $userId <= 0) {
+        return;
+    }
+
+    $eventType = trim($eventType);
+    if ($eventType === "") {
+        return;
+    }
+
+    $ipAddress = getClientIpAddress();
+    $geo = fetchGeoDataForIp($ipAddress);
+
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE public.login_activity
+            SET
+                ip_address = COALESCE(NULLIF(ip_address, ''), :ip_address),
+                location = COALESCE(NULLIF(location, ''), :location),
+                city = COALESCE(NULLIF(city, ''), :city),
+                region = COALESCE(NULLIF(region, ''), :region),
+                country = COALESCE(NULLIF(country, ''), :country)
+            WHERE id = (
+                SELECT id
+                FROM public.login_activity
+                WHERE user_id = :user_id
+                  AND LOWER(TRIM(COALESCE(event_type, ''))) = :event_type
+                ORDER BY created_at DESC
+                LIMIT 1
+            )
+        ");
+
+        $stmt->execute([
+            "ip_address" => $ipAddress,
+            "location" => $geo["location"],
+            "city" => $geo["city"],
+            "region" => $geo["region"],
+            "country" => $geo["country"],
+            "user_id" => $userId,
+            "event_type" => strtolower($eventType)
+        ]);
+    } catch (Throwable $e) {
+        // Fail silently so login is never blocked by enrichment
+    }
+}
+
 function finalizeLogin(array $user_row): void
 {
+    global $pdo;
+
     session_regenerate_id(true);
 
     unset(
@@ -54,11 +200,15 @@ function finalizeLogin(array $user_row): void
         "successful_login",
         "low",
         "login.php",
-    [
-        "userId" => $user_row["id"],
-        "username" => $user_row["username"]
-    ]
-);
+        [
+            "userId" => $user_row["id"],
+            "username" => $user_row["username"]
+        ]
+    );
+
+    if ($pdo instanceof PDO) {
+        enrichLatestLoginActivity($pdo, (int) $user_row["id"], "successful_login");
+    }
 
     $displayName = trim((string) ($user_row["name"] ?? ""));
     if ($displayName === "") {
@@ -78,6 +228,10 @@ function finalizeLogin(array $user_row): void
                     "username" => $user_row["username"]
                 ]
             );
+
+            if ($pdo instanceof PDO) {
+                enrichLatestLoginActivity($pdo, (int) $user_row["id"], "new_device_login");
+            }
         }
     }
 
@@ -157,6 +311,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     ]
                 );
 
+                if ($pdo instanceof PDO) {
+                    enrichLatestLoginActivity($pdo, (int) $user_row["id"], "password_verified_2fa_pending");
+                }
+
                 header("Location: verify_2fa.php");
                 exit;
             }
@@ -181,6 +339,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     "reason" => "Invalid username or password"
                 ]
             );
+
+            if ($pdo instanceof PDO && $failedUserId !== null) {
+                enrichLatestLoginActivity($pdo, $failedUserId, "failed_login");
+            }
         }
     }
 }
