@@ -339,9 +339,9 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
             $detailParts[] = "Location: " . $location;
         }
 
-        if ($areaText !== "" && strtolower($areaText) !== strtolower($location)) {
-            $detailParts[] = "Area: " . $areaText;
-        }
+        // if ($areaText !== "" && strtolower($areaText) !== strtolower($location)) {
+        //     $detailParts[] = "Area: " . $areaText;
+        // }
 
         if ($location === "" && $areaText === "") {
             $detailParts[] = "Location data unavailable";
