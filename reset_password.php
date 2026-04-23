@@ -21,6 +21,7 @@ $userId = (int) $_SESSION["password_reset_user_id"];
 $username = (string) $_SESSION["password_reset_username"];
 
 $message = "";
+$vaultProfile = null;
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $recoveryKeyInput = trim($_POST["recovery_key"] ?? "");
@@ -47,6 +48,25 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             if (!$row || !verifyRecoveryKey($recoveryKeyInput, (string) $row["recovery_key_hash"])) {
                 $message = "Invalid recovery key.";
             } else {
+                $vaultProfileStmt = $pdo->prepare('
+                    SELECT
+                        user_id,
+                        vault_salt,
+                        vault_iterations,
+                        vault_key_check,
+                        wrapped_vault_key,
+                        wrapped_vault_key_iv,
+                        wrapped_vault_key_recovery,
+                        wrapped_vault_key_recovery_iv
+                    FROM public.vault_profile
+                    WHERE user_id = :user_id
+                    LIMIT 1
+                ');
+                $vaultProfileStmt->execute([
+                    'user_id' => $userId
+                ]);
+                $vaultProfile = $vaultProfileStmt->fetch(PDO::FETCH_ASSOC);
+
                 $pdo->beginTransaction();
 
                 $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
@@ -61,18 +81,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     'id' => $userId
                 ]);
 
-                markRecoveryKeyUsed($pdo, $userId);
-
-                $newRecoveryKey = generateRecoveryKey();
-                $saved = upsertRecoveryKey($pdo, $userId, $newRecoveryKey);
-
-                if (!$saved) {
-                    throw new Exception("Could not rotate recovery key.");
-                }
-
                 $pdo->commit();
 
                 $_SESSION["password_reset_username_done"] = $username;
+                $_SESSION["password_reset_recovery_key"] = $recoveryKeyInput;
+                $_SESSION["password_reset_new_password"] = $newPassword;
+                $_SESSION["password_reset_vault_present"] = $vaultProfile ? "1" : "0";
 
                 unset(
                     $_SESSION["password_reset_user_id"],
