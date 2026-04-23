@@ -364,6 +364,33 @@ body {
     color: #27e9b5;
 }
 
+.attack-latest-wrap {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.attack-latest-title {
+    font-size: 19px;
+    font-weight: 700;
+    color: #d8dde6;
+    line-height: 1.2;
+}
+
+.attack-latest-details {
+    display: block;
+    width: 100%;
+    max-width: 760px;
+    font-size: 18px;
+    font-weight: 700;
+    color: #d8dde6;
+    line-height: 1.5;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
 .dash-table-like {
     background: #041c2b;
     border: 1px solid #25475b;
