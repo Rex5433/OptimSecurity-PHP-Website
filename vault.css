@@ -769,6 +769,5 @@ body.vault-body {
 @media (max-width: 700px) {
     .vault-sidebar-brand {
         justify-content: flex-start;
-        padding-left: 10px;
     }
 }
