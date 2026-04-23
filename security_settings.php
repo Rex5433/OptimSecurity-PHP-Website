@@ -464,7 +464,9 @@ if ($activeTwofaSecret !== '') {
 <body class="vault-body">
     <div class="vault-shell">
         <aside class="vault-sidebar">
-            <div class="vault-sidebar-title">Dashboard</div>
+            <div class="vault-sidebar-brand">
+                <img src="optimsecuritylogo.png" alt="Optimsecurity">
+            </div>
             <nav class="vault-nav">
                 <a class="vault-nav-item" href="homepage.php">Home</a>
                 <a class="vault-nav-item" href="password_checker.php">Password Check</a>
