@@ -24,7 +24,7 @@ $username = $_SESSION["user_username"] ?? "user";
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vault | Optimsecurity</title>
     <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
-    <link rel="stylesheet" href="vault.css?v=51">
+    <link rel="stylesheet" href="vault.css?v=52">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -388,41 +388,19 @@ $username = $_SESSION["user_username"] ?? "user";
 
     <script>
         (function () {
-            function randomRecoveryKey() {
-                const partA = Math.random().toString(36).slice(2, 10);
-                const partB = Math.random().toString(36).slice(2, 10);
-                const partC = Math.random().toString(36).slice(2, 10);
-                const partD = Date.now().toString(36);
-                return "vault-" + partA + "-" + partB + "-" + partC + "-" + partD;
-            }
+            sessionStorage.removeItem("vault_new_recovery_key");
 
             let loginPassword = sessionStorage.getItem("vault_login_password") || "";
             if (!loginPassword) {
-                const entered = prompt("Enter your login password for vault unlock/setup:");
+                const entered = prompt("Enter your current login password to unlock your vault:");
                 if (entered && entered.trim()) {
                     loginPassword = entered.trim();
                     sessionStorage.setItem("vault_login_password", loginPassword);
                 }
             }
-
-            let recoveryKey =
-                sessionStorage.getItem("vault_recovery_key") ||
-                sessionStorage.getItem("vault_new_recovery_key") ||
-                "";
-
-            if (!recoveryKey) {
-                recoveryKey = randomRecoveryKey();
-                sessionStorage.setItem("vault_recovery_key", recoveryKey);
-
-                alert(
-                    "Your vault recovery key has been created.\n\n" +
-                    recoveryKey +
-                    "\n\nSave this somewhere safe. You will need it to recover your vault later."
-                );
-            }
         })();
     </script>
     <script src="vault_crypto.js?v=300"></script>
-    <script src="vault_page.js?v=301"></script>
+    <script src="vault_page.js?v=302"></script>
 </body>
 </html>
