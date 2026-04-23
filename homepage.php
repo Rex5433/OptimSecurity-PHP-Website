@@ -155,6 +155,26 @@ function fetchSansNews(string $feedUrl): array
     return $items;
 }
 
+function normalizeWhitespace(string $text): string
+{
+    return trim(preg_replace('/\s+/', ' ', $text));
+}
+
+function formatDateText(?string $raw): string
+{
+    $raw = trim((string) $raw);
+    if ($raw === "") {
+        return "";
+    }
+
+    $ts = strtotime($raw);
+    if ($ts === false) {
+        return "";
+    }
+
+    return date("M j, Y", $ts);
+}
+
 function fetchUnit42News(string $url): array
 {
     $items = [];
@@ -164,37 +184,36 @@ function fetchUnit42News(string $url): array
         return $items;
     }
 
-    preg_match_all('/【(\d+)†([^】]+)】\s*([A-Za-z]+ \d{1,2}, \d{4})\s*【\d+†\s*([^】]+?)\s*】/u', $raw, $matches, PREG_SET_ORDER);
+    preg_match_all('/([A-Za-z]+\s+\d{1,2},\s+\d{4}).{0,250}?<a[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/is', $raw, $matches, PREG_SET_ORDER);
+
+    $seenLinks = [];
 
     foreach ($matches as $match) {
-        $linkId = trim((string) ($match[1] ?? ""));
-        $category = trim((string) ($match[2] ?? ""));
-        $dateText = trim((string) ($match[3] ?? ""));
-        $title = trim((string) ($match[4] ?? ""));
+        $dateText = trim((string) ($match[1] ?? ""));
+        $href = html_entity_decode((string) ($match[2] ?? ""), ENT_QUOTES | ENT_HTML5);
+        $title = normalizeWhitespace(strip_tags((string) ($match[3] ?? "")));
 
-        if ($title === "" || $dateText === "") {
+        if ($title === "" || $href === "" || $dateText === "") {
             continue;
         }
 
-        $link = $url;
-        if ($linkId !== "" && preg_match('/【' . preg_quote($linkId, '/') . '†([^】]+)】/u', $raw, $linkMatch)) {
-            $candidate = trim((string) ($linkMatch[1] ?? ""));
-            if ($candidate !== "") {
-                if (!str_starts_with($candidate, "http")) {
-                    $candidate = rtrim($url, "/") . "/" . ltrim($candidate, "/");
-                }
-                $link = $candidate;
-            }
+        if (!str_starts_with($href, "http")) {
+            $href = "https://unit42.paloaltonetworks.com" . $href;
         }
 
-        addNewsItem($items, [
+        if (isset($seenLinks[$href])) {
+            continue;
+        }
+        $seenLinks[$href] = true;
+
+        $items[] = [
             "title" => $title,
-            "summary" => $category !== "" ? "Latest $category update from Palo Alto Networks Unit 42." : "Latest threat research and intelligence from Palo Alto Networks Unit 42.",
+            "summary" => "Latest threat research and intelligence from Palo Alto Networks Unit 42.",
             "meta" => "Source: Unit 42",
-            "date" => date("M j, Y", strtotime($dateText)),
-            "link" => $link,
+            "date" => formatDateText($dateText),
+            "link" => $href,
             "timestamp" => normalizeNewsDate($dateText)
-        ]);
+        ];
 
         if (count($items) >= 4) {
             break;
