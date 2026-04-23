@@ -5,25 +5,14 @@ header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 header("Expires: 0");
 
-if (!isset($_SESSION["user_id"])) {
+$username = $_SESSION["password_reset_username_done"] ?? "user";
+
+if ($username === "user" && empty($_SESSION["password_reset_username_done"])) {
     header("Location: login.php");
     exit;
 }
 
-$username = $_SESSION["password_reset_username_done"] ?? ($_SESSION["user_username"] ?? "user");
-$oldRecoveryKey = $_SESSION["password_reset_recovery_key"] ?? "";
-$newPassword = $_SESSION["password_reset_new_password"] ?? "";
-$newRecoveryKey = $_SESSION["password_reset_new_recovery_key"] ?? "";
-$vaultPresent = ($_SESSION["password_reset_vault_present"] ?? "0") === "1";
-
-if ($newPassword === "" || $oldRecoveryKey === "") {
-    header("Location: security_settings.php");
-    exit;
-}
-
-if (empty($_SESSION["csrf_token"])) {
-    $_SESSION["csrf_token"] = bin2hex(random_bytes(32));
-}
+unset($_SESSION["user_id"], $_SESSION["user_username"], $_SESSION["user_name"], $_SESSION["logged_in"]);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -31,7 +20,6 @@ if (empty($_SESSION["csrf_token"])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Password Reset Complete | Optimsecurity</title>
-    <meta name="csrf-token" content="<?= htmlspecialchars($_SESSION["csrf_token"]) ?>">
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -48,106 +36,25 @@ if (empty($_SESSION["csrf_token"])) {
                 @<?= htmlspecialchars($username) ?>
             </p>
 
-            <div id="statusBox" class="login-error" style="display:none;"></div>
+            <div class="login-success">
+                Your password has been updated successfully.
+            </div>
 
             <p class="bottom-link" style="margin-top: 14px; margin-bottom: 18px;">
-                Your password has been updated. Continue back to the vault.
+                Please sign in again with your new password.
             </p>
 
-            <form id="continueForm" action="vault.php" method="get">
-                <button type="submit" class="login-submit">Continue</button>
+            <form action="login.php" method="get">
+                <button type="submit" class="login-submit">Back to Login</button>
             </form>
         </div>
     </div>
 
-    <script src="vault_crypto.js"></script>
     <script>
-        (async function () {
-            const statusBox = document.getElementById("statusBox");
-            const vaultPresent = <?= $vaultPresent ? "true" : "false" ?>;
-            const oldRecoveryKey = <?= json_encode($oldRecoveryKey) ?>;
-            const newPassword = <?= json_encode($newPassword) ?>;
-            const newRecoveryKey = <?= json_encode($newRecoveryKey) ?>;
-            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
-
-            function showStatus(text, isError = false) {
-                statusBox.style.display = "block";
-                statusBox.className = isError ? "login-error" : "login-success";
-                statusBox.textContent = text;
-            }
-
-            try {
-                sessionStorage.setItem("vault_login_password", newPassword);
-
-                if (newRecoveryKey) {
-                    sessionStorage.setItem("vault_recovery_key", newRecoveryKey);
-                }
-
-                if (!vaultPresent || !newRecoveryKey) {
-                    showStatus("Password reset complete.");
-                    return;
-                }
-
-                const profileRes = await fetch("vault_profile.php", {
-                    headers: {
-                        "X-Requested-With": "XMLHttpRequest"
-                    }
-                });
-
-                const profileRaw = await profileRes.text();
-                const profileData = profileRaw ? JSON.parse(profileRaw) : {};
-
-                if (!profileData.ok || !profileData.exists || !profileData.profile) {
-                    throw new Error("Could not load vault profile.");
-                }
-
-                const profile = profileData.profile;
-
-                const wrappedPassword = await window.VaultCrypto.rewrapVaultFromRecoveryToPassword(
-                    oldRecoveryKey,
-                    newPassword,
-                    profile
-                );
-
-                const wrappedRecovery = await window.VaultCrypto.rewrapVaultKeyWithRecovery(
-                    oldRecoveryKey,
-                    newRecoveryKey,
-                    profile
-                );
-
-                const saveRes = await fetch("vault_init.php", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": csrfToken
-                    },
-                    body: JSON.stringify({
-                        vault_salt: profile.vault_salt,
-                        vault_iterations: profile.vault_iterations,
-                        vault_key_check: profile.vault_key_check,
-                        wrapped_vault_key: wrappedPassword.wrapped_vault_key,
-                        wrapped_vault_key_iv: wrappedPassword.wrapped_vault_key_iv,
-                        wrapped_vault_key_recovery: wrappedRecovery.wrapped_vault_key_recovery,
-                        wrapped_vault_key_recovery_iv: wrappedRecovery.wrapped_vault_key_recovery_iv
-                    })
-                });
-
-                const saveRaw = await saveRes.text();
-                const saveData = saveRaw ? JSON.parse(saveRaw) : {};
-
-                if (!saveRes.ok || !saveData.ok) {
-                    throw new Error(saveData.error || saveData.debug || "Could not update vault profile.");
-                }
-
-                showStatus("Password reset complete. Vault access was preserved.");
-            } catch (error) {
-                showStatus(
-                    "Password reset complete, but vault re-wrap failed. " +
-                    (error?.message ? "Details: " + error.message : ""),
-                    true
-                );
-            }
-        })();
+        try {
+            localStorage.clear();
+            sessionStorage.clear();
+        } catch (e) {}
     </script>
 </body>
 </html>
