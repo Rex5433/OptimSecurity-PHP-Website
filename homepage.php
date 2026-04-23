@@ -21,6 +21,8 @@ $name = $_SESSION["user_name"] ?? "User";
 
 $kevUrl = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 $advisoriesUrl = "https://www.cisa.gov/news-events/cybersecurity-advisories";
+$sansFeedUrl = "https://isc.sans.edu/rssfeed_full.xml";
+$unit42Url = "https://unit42.paloaltonetworks.com/";
 
 $recentVulns = [];
 $newsItems = [];
@@ -76,6 +78,130 @@ function fetchUrl($url)
     ]);
 
     return @file_get_contents($url, false, $context);
+}
+
+function normalizeNewsDate(?string $value): int
+{
+    $value = trim((string) ($value ?? ""));
+    if ($value === "") {
+        return 0;
+    }
+
+    $ts = strtotime($value);
+    return $ts !== false ? $ts : 0;
+}
+
+function addNewsItem(array &$newsItems, array $item): void
+{
+    $title = trim((string) ($item["title"] ?? ""));
+    $link = trim((string) ($item["link"] ?? ""));
+
+    if ($title === "" || $link === "") {
+        return;
+    }
+
+    foreach ($newsItems as $existing) {
+        if (
+            trim((string) ($existing["title"] ?? "")) === $title ||
+            trim((string) ($existing["link"] ?? "")) === $link
+        ) {
+            return;
+        }
+    }
+
+    $newsItems[] = $item;
+}
+
+function fetchSansNews(string $feedUrl): array
+{
+    $items = [];
+    $raw = fetchUrl($feedUrl);
+
+    if ($raw === false) {
+        return $items;
+    }
+
+    libxml_use_internal_errors(true);
+    $xml = simplexml_load_string($raw);
+
+    if ($xml === false || empty($xml->channel->item)) {
+        return $items;
+    }
+
+    foreach ($xml->channel->item as $entry) {
+        $title = trim((string) ($entry->title ?? ""));
+        $link = trim((string) ($entry->link ?? ""));
+        $dateText = trim((string) ($entry->pubDate ?? ""));
+        $description = trim(strip_tags((string) ($entry->description ?? "")));
+
+        if ($title === "" || $link === "") {
+            continue;
+        }
+
+        $items[] = [
+            "title" => $title,
+            "summary" => $description !== "" ? $description : "Latest update from SANS Internet Storm Center.",
+            "meta" => "Source: SANS ISC",
+            "date" => $dateText !== "" ? date("M j, Y", strtotime($dateText)) : "",
+            "link" => $link,
+            "timestamp" => normalizeNewsDate($dateText)
+        ];
+
+        if (count($items) >= 4) {
+            break;
+        }
+    }
+
+    return $items;
+}
+
+function fetchUnit42News(string $url): array
+{
+    $items = [];
+    $raw = fetchUrl($url);
+
+    if ($raw === false) {
+        return $items;
+    }
+
+    preg_match_all('/【(\d+)†([^】]+)】\s*([A-Za-z]+ \d{1,2}, \d{4})\s*【\d+†\s*([^】]+?)\s*】/u', $raw, $matches, PREG_SET_ORDER);
+
+    foreach ($matches as $match) {
+        $linkId = trim((string) ($match[1] ?? ""));
+        $category = trim((string) ($match[2] ?? ""));
+        $dateText = trim((string) ($match[3] ?? ""));
+        $title = trim((string) ($match[4] ?? ""));
+
+        if ($title === "" || $dateText === "") {
+            continue;
+        }
+
+        $link = $url;
+        if ($linkId !== "" && preg_match('/【' . preg_quote($linkId, '/') . '†([^】]+)】/u', $raw, $linkMatch)) {
+            $candidate = trim((string) ($linkMatch[1] ?? ""));
+            if ($candidate !== "") {
+                if (!str_starts_with($candidate, "http")) {
+                    $candidate = rtrim($url, "/") . "/" . ltrim($candidate, "/");
+                }
+                $link = $candidate;
+            }
+        }
+
+        addNewsItem($items, [
+            "title" => $title,
+            "summary" => $category !== "" ? "Latest $category update from Palo Alto Networks Unit 42." : "Latest threat research and intelligence from Palo Alto Networks Unit 42.",
+            "meta" => "Source: Unit 42",
+            "date" => date("M j, Y", strtotime($dateText)),
+            "link" => $link,
+            "timestamp" => normalizeNewsDate($dateText)
+        ]);
+
+        if (count($items) >= 4) {
+            break;
+        }
+    }
+
+    return $items;
 }
 
 function buildAttackMetrics(PDO $pdo, int $userId): array
@@ -179,24 +305,47 @@ if ($rawAdvisories !== false) {
                 $dateText = $dateMatch[0];
             }
 
-            $newsItems[] = [
+            addNewsItem($newsItems, [
                 "title" => $title,
                 "summary" => "Live update from CISA Cybersecurity Alerts & Advisories.",
                 "meta" => "Source: CISA",
                 "date" => $dateText,
-                "link" => $href
-            ];
+                "link" => $href,
+                "timestamp" => normalizeNewsDate($dateText)
+            ]);
         }
 
         if (count($newsItems) >= 4) {
             break;
         }
     }
-
-    $newsItems = array_values(array_unique($newsItems, SORT_REGULAR));
 } else {
     $feedError .= "Unable to load CISA advisories page. ";
 }
+
+$sansItems = fetchSansNews($sansFeedUrl);
+if (empty($sansItems)) {
+    $feedError .= "Unable to load SANS ISC feed. ";
+} else {
+    foreach ($sansItems as $item) {
+        addNewsItem($newsItems, $item);
+    }
+}
+
+$unit42Items = fetchUnit42News($unit42Url);
+if (empty($unit42Items)) {
+    $feedError .= "Unable to load Unit 42 updates. ";
+} else {
+    foreach ($unit42Items as $item) {
+        addNewsItem($newsItems, $item);
+    }
+}
+
+usort($newsItems, function ($a, $b) {
+    return ((int) ($b["timestamp"] ?? 0)) <=> ((int) ($a["timestamp"] ?? 0));
+});
+
+$newsItems = array_slice($newsItems, 0, 4);
 
 if (empty($recentVulns)) {
     $recentVulns = [
@@ -217,7 +366,8 @@ if (empty($newsItems)) {
             "summary" => "Could not load titled security updates right now.",
             "meta" => "Fallback mode",
             "date" => date("Y-m-d"),
-            "link" => "#"
+            "link" => "#",
+            "timestamp" => time()
         ]
     ];
 }
@@ -227,8 +377,8 @@ $attackMetrics = buildAttackMetrics($pdo, $userId);
 $alertCount = count($recentVulns);
 $threatScore = getThreatScore($alertCount);
 $passwordHealth = "Strong";
-$feedStatusText = ($feedOnline || $advisoryOnline) ? "Live Feed Online" : "Feed Offline";
-$liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-status-bar offline";
+$feedStatusText = ($feedOnline || $advisoryOnline || !empty($sansItems) || !empty($unit42Items)) ? "Live Feed Online" : "Feed Offline";
+$liveStatusClass = ($feedOnline || $advisoryOnline || !empty($sansItems) || !empty($unit42Items)) ? "live-status-bar" : "live-status-bar offline";
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -310,7 +460,12 @@ $liveStatusClass = ($feedOnline || $advisoryOnline) ? "live-status-bar" : "live-
                                 target="_blank" rel="noopener noreferrer">
                                 <div class="news-head"><?= safeText($item["title"]) ?></div>
                                 <div class="news-sub"><?= safeText($item["summary"]) ?></div>
-                                <div class="news-meta"><?= safeText($item["meta"]) ?></div>
+                                <div class="news-meta">
+                                    <?= safeText($item["meta"]) ?>
+                                    <?php if (!empty($item["date"])): ?>
+                                        • <?= safeText($item["date"]) ?>
+                                    <?php endif; ?>
+                                </div>
                             </a>
                         <?php endforeach; ?>
                     </div>
