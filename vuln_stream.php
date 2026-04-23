@@ -62,44 +62,70 @@ function fetchUrl($url)
     return @file_get_contents($url, false, $context);
 }
 
+function formatEventTypeLabel(string $eventType): string
+{
+    $eventType = strtolower(trim($eventType));
+
+    if ($eventType === "successful_login") {
+        return "Successful Login";
+    }
+
+    if ($eventType === "failed_login") {
+        return "Failed Login";
+    }
+
+    if ($eventType === "") {
+        return "No Recent Activity";
+    }
+
+    return ucwords(str_replace("_", " ", $eventType));
+}
+
 function buildAttackMetrics(PDO $pdo, int $userId): array
 {
     $series = [];
     $labels = [];
     $dates = [];
     $weekCount = 0;
-    $latestType = "No Recent Activity";
+
+    $tz = new DateTimeZone("America/Chicago");
+    $today = new DateTimeImmutable("now", $tz);
+    $today = $today->setTime(0, 0, 0);
+
+    $countStmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM public.login_activity
+        WHERE user_id = ?
+          AND created_at BETWEEN ? AND ?
+          AND LOWER(TRIM(COALESCE(event_type, ''))) = ?
+    ");
 
     for ($i = 6; $i >= 0; $i--) {
-        $dayTs = strtotime("-$i days");
-        $dayStart = date("Y-m-d 00:00:00", $dayTs);
-        $dayEnd = date("Y-m-d 23:59:59", $dayTs);
+        $day = $today->modify("-{$i} days");
 
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*)
-            FROM public.login_activity
-            WHERE user_id = ?
-              AND created_at BETWEEN ? AND ?
-              AND LOWER(TRIM(COALESCE(event_type, ''))) = ?
-        ");
+        $dayStart = $day->format("Y-m-d 00:00:00");
+        $dayEnd = $day->format("Y-m-d 23:59:59");
 
-        $stmt->execute([
+        $countStmt->execute([
             $userId,
             $dayStart,
             $dayEnd,
             "successful_login"
         ]);
 
-        $count = (int) $stmt->fetchColumn();
+        $count = (int) $countStmt->fetchColumn();
 
         $series[] = $count;
-        $labels[] = date("D", $dayTs);
-        $dates[] = date("M j", $dayTs);
+        $labels[] = $day->format("D");
+        $dates[] = $day->format("M j");
         $weekCount += $count;
     }
 
+    $latestType = "No Recent Activity";
+    $latestDetails = "No recent login details available.";
+
     $latestStmt = $pdo->prepare("
-        SELECT created_at
+        SELECT event_type, created_at, ip_address, location, city, region, country
         FROM public.login_activity
         WHERE user_id = ?
           AND LOWER(TRIM(COALESCE(event_type, ''))) = ?
@@ -112,9 +138,50 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
         "successful_login"
     ]);
 
-    $latestCreatedAt = $latestStmt->fetchColumn();
-    if ($latestCreatedAt !== false) {
-        $latestType = "Successful Login";
+    $latestRow = $latestStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($latestRow) {
+        $latestType = formatEventTypeLabel((string) ($latestRow["event_type"] ?? ""));
+
+        $detailParts = [];
+
+        $createdAtRaw = trim((string) ($latestRow["created_at"] ?? ""));
+        if ($createdAtRaw !== "") {
+            $createdTs = strtotime($createdAtRaw);
+            if ($createdTs !== false) {
+                $detailParts[] = date("M j, Y g:i A", $createdTs);
+            }
+        }
+
+        $ipAddress = trim((string) ($latestRow["ip_address"] ?? ""));
+        if ($ipAddress !== "") {
+            $detailParts[] = "IP: " . $ipAddress;
+        }
+
+        $location = trim((string) ($latestRow["location"] ?? ""));
+        $city = trim((string) ($latestRow["city"] ?? ""));
+        $region = trim((string) ($latestRow["region"] ?? ""));
+        $country = trim((string) ($latestRow["country"] ?? ""));
+
+        $cityRegionCountry = array_values(array_filter([$city, $region, $country], function ($value) {
+            return trim((string) $value) !== "";
+        }));
+
+        if ($location !== "") {
+            $detailParts[] = "Location: " . $location;
+        }
+
+        if (!empty($cityRegionCountry)) {
+            $detailParts[] = "Area: " . implode(", ", $cityRegionCountry);
+        }
+
+        if ($location === "" && empty($cityRegionCountry)) {
+            $detailParts[] = "Location: Unknown";
+        }
+
+        if (!empty($detailParts)) {
+            $latestDetails = implode(" • ", $detailParts);
+        }
     }
 
     $todayCount = end($series);
@@ -128,7 +195,8 @@ function buildAttackMetrics(PDO $pdo, int $userId): array
         "dates" => $dates,
         "currentCount" => $todayCount,
         "weekCount" => $weekCount,
-        "latestType" => $latestType
+        "latestType" => $latestType,
+        "latestDetails" => $latestDetails
     ];
 }
 
@@ -478,7 +546,8 @@ if ($pdo instanceof PDO && $userId > 0) {
         "dates" => ["", "", "", "", "", "", ""],
         "currentCount" => 0,
         "weekCount" => 0,
-        "latestType" => "No Recent Activity"
+        "latestType" => "No Recent Activity",
+        "latestDetails" => "No recent login details available."
     ];
 }
 
@@ -497,6 +566,7 @@ echo json_encode([
     "attackLabels" => $attackMetrics["labels"],
     "attackDates" => $attackMetrics["dates"],
     "attackLatestType" => $attackMetrics["latestType"],
+    "attackLatestDetails" => $attackMetrics["latestDetails"],
     "attackCurrentCount" => $attackMetrics["currentCount"],
     "attackWeekCount" => $attackMetrics["weekCount"]
 ]);
