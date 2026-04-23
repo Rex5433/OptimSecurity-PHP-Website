@@ -49,19 +49,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             } else {
                 $pdo->beginTransaction();
 
-                $userStmt = $pdo->prepare('
-                    SELECT id, username, name
-                    FROM "Accounts"
-                    WHERE id = :id
-                    LIMIT 1
-                ');
-                $userStmt->execute(['id' => $userId]);
-                $userRow = $userStmt->fetch(PDO::FETCH_ASSOC);
-
-                if (!$userRow) {
-                    throw new Exception("User not found during password reset.");
-                }
-
                 $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
 
                 $updateStmt = $pdo->prepare('
@@ -74,25 +61,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     'id' => $userId
                 ]);
 
-                $vaultProfileStmt = $pdo->prepare('
-                    SELECT
-                        user_id,
-                        vault_salt,
-                        vault_iterations,
-                        vault_key_check,
-                        wrapped_vault_key,
-                        wrapped_vault_key_iv,
-                        wrapped_vault_key_recovery,
-                        wrapped_vault_key_recovery_iv
-                    FROM public.vault_profile
-                    WHERE user_id = :user_id
-                    LIMIT 1
-                ');
-                $vaultProfileStmt->execute([
-                    'user_id' => $userId
-                ]);
-                $vaultProfile = $vaultProfileStmt->fetch(PDO::FETCH_ASSOC);
-
                 markRecoveryKeyUsed($pdo, $userId);
 
                 $newRecoveryKey = generateRecoveryKey();
@@ -104,23 +72,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 $pdo->commit();
 
-                $displayName = trim((string) ($userRow["name"] ?? ""));
-                if ($displayName === "") {
-                    $displayName = (string) $userRow["username"];
-                }
-
-                session_regenerate_id(true);
-
-                $_SESSION["user_id"] = (int) $userRow["id"];
-                $_SESSION["user_username"] = (string) $userRow["username"];
-                $_SESSION["user_name"] = $displayName;
-                $_SESSION["logged_in"] = true;
-
-                $_SESSION["password_reset_recovery_key"] = $recoveryKeyInput;
-                $_SESSION["password_reset_new_password"] = $newPassword;
-                $_SESSION["password_reset_new_recovery_key"] = $newRecoveryKey;
-                $_SESSION["password_reset_username_done"] = (string) $userRow["username"];
-                $_SESSION["password_reset_vault_present"] = $vaultProfile ? "1" : "0";
+                $_SESSION["password_reset_username_done"] = $username;
 
                 unset(
                     $_SESSION["password_reset_user_id"],
