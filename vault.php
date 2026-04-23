@@ -355,6 +355,25 @@ $username = $_SESSION["user_username"] ?? "user";
         </div>
     </div>
 
+    <div class="vault-modal-backdrop hidden" id="folderModal">
+        <div class="vault-modal">
+            <div class="vault-modal-badge">Folder</div>
+            <h2>Create Folder</h2>
+
+            <div id="folderMessage" class="vault-inline-message hidden"></div>
+
+            <div class="vault-form-group">
+                <label for="folderNameInput">Folder Name</label>
+                <input type="text" id="folderNameInput" placeholder="Enter folder name">
+            </div>
+
+            <div class="vault-actions-row">
+                <button type="button" class="vault-secondary-btn" id="cancelFolderBtn">Cancel</button>
+                <button type="button" class="vault-primary-btn" id="saveFolderBtn">Save Folder</button>
+            </div>
+        </div>
+    </div>
+
     <script src="vault_crypto.js?v=100"></script>
     <script src="vault_page.js?v=100"></script>
 </body>
