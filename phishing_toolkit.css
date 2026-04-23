@@ -31,11 +31,20 @@ body {
     min-height: calc(100vh - 48px);
 }
 
-.sidebar h2 {
-    font-size: 21px;
-    font-weight: 800;
-    color: #ffffff;
-    margin-bottom: 20px;
+.sidebar-brand {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 0 18px;
+    margin-bottom: 14px;
+}
+
+.sidebar-logo {
+    width: 165px;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
 }
 
 .sidebar-nav {
@@ -618,5 +627,9 @@ button:hover {
 
     button {
         width: 100%;
+    }
+
+    .sidebar-brand {
+        justify-content: flex-start;
     }
 }
