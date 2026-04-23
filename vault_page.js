@@ -78,40 +78,15 @@
     let selectedFolder = "__all__";
     let vaultKey = null;
 
-    const vaultUserKey =
-        document.querySelector(".vault-user-chip")?.textContent?.trim() || "vault_user";
-
-    function getFolderStorageKey() {
-        return `vault_folders_${vaultUserKey}`;
-    }
-
-    function loadSavedFolders() {
-        try {
-            const raw = localStorage.getItem(getFolderStorageKey());
-            const parsed = raw ? JSON.parse(raw) : [];
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (error) {
-            return [];
-        }
-    }
-
-    function saveSavedFolders(folders) {
-        try {
-            localStorage.setItem(
-                getFolderStorageKey(),
-                JSON.stringify(folders)
-            );
-        } catch (error) {
-            console.warn("Could not save folders to localStorage.", error);
-        }
-    }
-
     function setMessage(node, text, type = "error") {
         if (!node) return;
         node.textContent = text || "";
         node.className = `vault-inline-message ${type}`;
-        if (text) node.classList.remove("hidden");
-        else node.classList.add("hidden");
+        if (text) {
+            node.classList.remove("hidden");
+        } else {
+            node.classList.add("hidden");
+        }
     }
 
     function clearMessage(node) {
@@ -390,12 +365,26 @@
         });
     }
 
-    function updateKnownFolders() {
-        const folderSet = new Set(loadSavedFolders());
+    async function updateKnownFolders() {
+        const folderSet = new Set();
+
+        try {
+            const folderRes = await apiFetch("vault_folder_list.php");
+            (folderRes.folders || []).forEach((row) => {
+                const folder = String(row.folder_name || "").trim();
+                if (folder) {
+                    folderSet.add(folder);
+                }
+            });
+        } catch (error) {
+            console.warn("Could not load DB folders:", error);
+        }
 
         items.forEach((item) => {
             const folder = (item.folder_name || "").trim();
-            if (folder) folderSet.add(folder);
+            if (folder) {
+                folderSet.add(folder);
+            }
         });
 
         knownFolders = Array.from(folderSet).sort((a, b) => a.localeCompare(b));
@@ -404,7 +393,6 @@
             selectedFolder = "__all__";
         }
 
-        saveSavedFolders(knownFolders);
         renderFolders();
         updateFolderOptions();
         updateStats();
@@ -437,11 +425,6 @@
     }
 
     async function renameFolder(oldFolderName) {
-        if (!vaultKey) {
-            setMessage(pageMessage, "Vault is locked.", "error");
-            return;
-        }
-
         const newFolderName = window.prompt("Rename folder:", oldFolderName);
 
         if (newFolderName === null) {
@@ -459,51 +442,30 @@
             return;
         }
 
-        if (knownFolders.includes(trimmed)) {
-            setMessage(pageMessage, "A folder with that name already exists.", "error");
-            return;
-        }
-
-        const matchingItems = items.filter(
-            (item) => (item.folder_name || "").trim() === oldFolderName
-        );
-
         try {
-            for (const item of matchingItems) {
-                const updatedItem = {
-                    item_name: item.item_name,
-                    item_type: item.item_type,
-                    folder_name: trimmed,
-                    payload: item.payload || {}
-                };
-
-                await saveEncryptedItem(updatedItem, item.id);
-            }
+            await apiFetch("vault_folder_rename.php", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    old_name: oldFolderName,
+                    new_name: trimmed
+                })
+            });
 
             if (selectedFolder === oldFolderName) {
                 selectedFolder = trimmed;
             }
 
-            saveSavedFolders(knownFolders.map((name) => name === oldFolderName ? trimmed : name));
-
             setMessage(pageMessage, `Folder renamed to "${trimmed}".`, "success");
             await loadItems();
         } catch (error) {
-            console.error("folder rename error:", error);
             setMessage(pageMessage, error.message || "Could not rename folder.", "error");
         }
     }
 
     async function deleteFolder(folderName) {
-        if (!vaultKey) {
-            setMessage(pageMessage, "Vault is locked.", "error");
-            return;
-        }
-
-        const matchingItems = items.filter(
-            (item) => (item.folder_name || "").trim() === folderName
-        );
-
         const confirmed = window.confirm(
             `Delete folder "${folderName}"? Items will be kept, but removed from this folder.`
         );
@@ -513,27 +475,23 @@
         }
 
         try {
-            for (const item of matchingItems) {
-                const updatedItem = {
-                    item_name: item.item_name,
-                    item_type: item.item_type,
-                    folder_name: "",
-                    payload: item.payload || {}
-                };
-
-                await saveEncryptedItem(updatedItem, item.id);
-            }
+            await apiFetch("vault_folder_delete.php", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    folder_name: folderName
+                })
+            });
 
             if (selectedFolder === folderName) {
                 selectedFolder = "__all__";
             }
 
-            saveSavedFolders(knownFolders.filter((name) => name !== folderName));
-
             setMessage(pageMessage, `Folder "${folderName}" deleted.`, "success");
             await loadItems();
         } catch (error) {
-            console.error("folder delete error:", error);
             setMessage(pageMessage, error.message || "Could not delete folder.", "error");
         }
     }
@@ -769,7 +727,7 @@
         }
 
         items = decrypted;
-        updateKnownFolders();
+        await updateKnownFolders();
         renderItems();
     }
 
@@ -1013,7 +971,7 @@
     }
 
     if (saveFolderBtn) {
-        saveFolderBtn.addEventListener("click", () => {
+        saveFolderBtn.addEventListener("click", async () => {
             const trimmed = folderNameInput.value.trim();
 
             if (!trimmed) {
@@ -1021,24 +979,38 @@
                 return;
             }
 
-            if (!knownFolders.includes(trimmed)) {
-                knownFolders.push(trimmed);
-                knownFolders.sort((a, b) => a.localeCompare(b));
-                saveSavedFolders(knownFolders);
+            try {
+                await apiFetch("vault_folder_save.php", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        folder_name: trimmed
+                    })
+                });
+
+                if (!knownFolders.includes(trimmed)) {
+                    knownFolders.push(trimmed);
+                    knownFolders.sort((a, b) => a.localeCompare(b));
+                }
+
+                selectedFolder = trimmed;
+
+                updateFolderFilterButtons();
+                renderFolders();
+                updateFolderOptions();
+                updateStats();
+
+                if (itemFolder) {
+                    itemFolder.value = trimmed;
+                }
+
+                closeFolderModal();
+                setMessage(pageMessage, "Folder created.", "success");
+            } catch (error) {
+                setMessage(folderMessage, error.message || "Could not create folder.", "error");
             }
-
-            selectedFolder = trimmed;
-
-            updateFolderFilterButtons();
-            renderFolders();
-            updateFolderOptions();
-            updateStats();
-
-            if (itemFolder) {
-                itemFolder.value = trimmed;
-            }
-
-            closeFolderModal();
         });
     }
 
