@@ -56,7 +56,13 @@ include "db.php";
 
                     <form class="generator-form" id="generatorForm">
                         <div class="generator-form-group">
-                            <label for="keywordInput">Keyword / Custom Word</label>
+                            <div class="generator-label-row">
+                                <label for="keywordInput">Keyword / Custom Word</label>
+
+                                <span class="generator-char-count">
+                                    <span id="keyword-count">0</span> characters long
+                                </span>
+                            </div>
                             <input
                                 type="text"
                                 id="keywordInput"
@@ -179,6 +185,14 @@ include "db.php";
         const API_URL = "/generate_passwords_proxy.php";
         const candidateCountInput = document.getElementById("candidateCount");
         const candidateCountButtons = document.querySelectorAll(".generator-count-btn");
+        const keywordInput = document.getElementById("keywordInput");
+        const keywordCount = document.getElementById("keyword-count");
+
+        if (keywordInput && keywordCount) {
+            keywordInput.addEventListener("input", function () {
+                keywordCount.textContent = keywordInput.value.length;
+            });
+        }
 
         candidateCountButtons.forEach(function (button) {
             button.addEventListener("click", function () {
