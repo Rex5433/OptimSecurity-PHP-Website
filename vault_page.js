@@ -66,6 +66,12 @@
     const noteTitle = document.getElementById("noteTitle");
     const noteContent = document.getElementById("noteContent");
 
+    const folderModal = document.getElementById("folderModal");
+    const folderNameInput = document.getElementById("folderNameInput");
+    const saveFolderBtn = document.getElementById("saveFolderBtn");
+    const cancelFolderBtn = document.getElementById("cancelFolderBtn");
+    const folderMessage = document.getElementById("folderMessage");
+
     let items = [];
     let knownFolders = [];
     let selectedType = "all";
@@ -359,7 +365,20 @@
         }
 
         renderFolders();
+        updateFolderOptions();
         updateStats();
+    }
+
+    function updateFolderOptions() {
+        const folderOptions = document.getElementById("vaultFolderOptions");
+        if (!folderOptions) return;
+
+        folderOptions.innerHTML = "";
+        knownFolders.forEach((folder) => {
+            const option = document.createElement("option");
+            option.value = folder;
+            folderOptions.appendChild(option);
+        });
     }
 
     function renderFolders() {
@@ -373,14 +392,23 @@
         folderList.innerHTML = "";
 
         knownFolders.forEach((folder) => {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "vault-folder-btn";
-            btn.textContent = folder;
+            const row = document.createElement("div");
+            row.style.display = "flex";
+            row.style.gap = "8px";
+            row.style.alignItems = "center";
+            row.style.marginBottom = "8px";
 
-            if (selectedFolder === folder) btn.classList.add("active");
+            const selectBtn = document.createElement("button");
+            selectBtn.type = "button";
+            selectBtn.className = "vault-folder-btn";
+            selectBtn.textContent = folder;
+            selectBtn.style.flex = "1";
 
-            btn.addEventListener("click", () => {
+            if (selectedFolder === folder) {
+                selectBtn.classList.add("active");
+            }
+
+            selectBtn.addEventListener("click", () => {
                 selectedFolder = folder;
                 updateFolderFilterButtons();
                 renderFolders();
@@ -388,7 +416,19 @@
                 renderItems();
             });
 
-            folderList.appendChild(btn);
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "vault-action-btn danger";
+            deleteBtn.textContent = "Delete";
+
+            deleteBtn.addEventListener("click", async (event) => {
+                event.stopPropagation();
+                await deleteFolder(folder);
+            });
+
+            row.appendChild(selectBtn);
+            row.appendChild(deleteBtn);
+            folderList.appendChild(row);
         });
     }
 
@@ -509,6 +549,74 @@
         renderItems();
     }
 
+    async function saveEncryptedItem(fullItem, existingId = 0) {
+        const encrypted = await window.VaultCrypto.encryptText(
+            vaultKey,
+            JSON.stringify(fullItem)
+        );
+
+        if (!encrypted || !encrypted.encrypted_data || !encrypted.iv) {
+            throw new Error("Encryption failed before save.");
+        }
+
+        await apiFetch("vault_save.php", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                item_id: existingId ? Number(existingId) : 0,
+                item_name: fullItem.item_name,
+                item_type: fullItem.item_type,
+                folder_name: fullItem.folder_name,
+                encrypted_data: encrypted.encrypted_data,
+                iv: encrypted.iv
+            })
+        });
+    }
+
+    async function deleteFolder(folderName) {
+        if (!vaultKey) {
+            setMessage(pageMessage, "Vault is locked.", "error");
+            return;
+        }
+
+        const matchingItems = items.filter(
+            (item) => (item.folder_name || "").trim() === folderName
+        );
+
+        const confirmed = window.confirm(
+            `Delete folder "${folderName}"? Items will be kept, but removed from this folder.`
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            for (const item of matchingItems) {
+                const updatedItem = {
+                    item_name: item.item_name,
+                    item_type: item.item_type,
+                    folder_name: "",
+                    payload: item.payload || {}
+                };
+
+                await saveEncryptedItem(updatedItem, item.id);
+            }
+
+            if (selectedFolder === folderName) {
+                selectedFolder = "__all__";
+            }
+
+            setMessage(pageMessage, `Folder "${folderName}" deleted.`, "success");
+            await loadItems();
+        } catch (error) {
+            console.error("folder delete error:", error);
+            setMessage(pageMessage, error.message || "Could not delete folder.", "error");
+        }
+    }
+
     function openItemModal(existing = null) {
         clearMessage(itemMessage);
         itemForm.reset();
@@ -569,31 +677,7 @@
                 throw new Error("Item type is required.");
             }
 
-            const encrypted = await window.VaultCrypto.encryptText(
-                vaultKey,
-                JSON.stringify(fullItem)
-            );
-
-            if (!encrypted || !encrypted.encrypted_data || !encrypted.iv) {
-                throw new Error("Encryption failed before save.");
-            }
-
-            const requestBody = {
-                item_id: itemId.value ? Number(itemId.value) : 0,
-                item_name: fullItem.item_name,
-                item_type: fullItem.item_type,
-                folder_name: fullItem.folder_name,
-                encrypted_data: encrypted.encrypted_data,
-                iv: encrypted.iv
-            };
-
-            await apiFetch("vault_save.php", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(requestBody)
-            });
+            await saveEncryptedItem(fullItem, itemId.value ? Number(itemId.value) : 0);
 
             closeItemModal();
             setMessage(pageMessage, "Vault item saved successfully.", "success");
@@ -686,6 +770,24 @@
         });
     }
 
+    function openFolderModal() {
+        if (!folderModal) return;
+
+        folderNameInput.value = "";
+        clearMessage(folderMessage);
+
+        folderModal.classList.remove("hidden");
+        folderNameInput.focus();
+    }
+
+    function closeFolderModal() {
+        if (!folderModal) return;
+
+        folderModal.classList.add("hidden");
+        folderNameInput.value = "";
+        clearMessage(folderMessage);
+    }
+
     if (newItemBtn) newItemBtn.addEventListener("click", () => openItemModal(null));
     if (cancelItemBtn) cancelItemBtn.addEventListener("click", closeItemModal);
 
@@ -745,6 +847,43 @@
             renderItems();
         });
     });
+
+    if (newFolderBtn) {
+        newFolderBtn.addEventListener("click", openFolderModal);
+    }
+
+    if (cancelFolderBtn) {
+        cancelFolderBtn.addEventListener("click", closeFolderModal);
+    }
+
+    if (saveFolderBtn) {
+        saveFolderBtn.addEventListener("click", () => {
+            const trimmed = folderNameInput.value.trim();
+
+            if (!trimmed) {
+                setMessage(folderMessage, "Folder name is required.", "error");
+                return;
+            }
+
+            if (!knownFolders.includes(trimmed)) {
+                knownFolders.push(trimmed);
+                knownFolders.sort((a, b) => a.localeCompare(b));
+            }
+
+            selectedFolder = trimmed;
+
+            updateFolderFilterButtons();
+            renderFolders();
+            updateFolderOptions();
+            updateStats();
+
+            if (itemFolder) {
+                itemFolder.value = trimmed;
+            }
+
+            closeFolderModal();
+        });
+    }
 
     updateTypeFilterButtons();
     updateFolderFilterButtons();
