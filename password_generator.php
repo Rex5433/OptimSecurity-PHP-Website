@@ -19,7 +19,9 @@ include "db.php";
 <body class="generator-body">
     <div class="generator-shell">
         <aside class="generator-sidebar">
-            <div class="generator-sidebar-title">Dashboard</div>
+            <div class="generator-sidebar-title">
+                <img src="optimsecuritylogo.png" alt="Optimsecurity" class="generator-sidebar-logo">
+            </div>
 
             <nav class="generator-nav">
                 <a href="homepage.php" class="generator-nav-item">Home</a>
