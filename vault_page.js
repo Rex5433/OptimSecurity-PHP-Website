@@ -350,6 +350,18 @@
         if (statSelectedFolder) statSelectedFolder.textContent = selectedFolder === "__all__" ? "All" : selectedFolder;
     }
 
+    function updateFolderOptions() {
+        const folderOptions = document.getElementById("vaultFolderOptions");
+        if (!folderOptions) return;
+
+        folderOptions.innerHTML = "";
+        knownFolders.forEach((folder) => {
+            const option = document.createElement("option");
+            option.value = folder;
+            folderOptions.appendChild(option);
+        });
+    }
+
     function updateKnownFolders() {
         const folderSet = new Set();
 
@@ -369,16 +381,128 @@
         updateStats();
     }
 
-    function updateFolderOptions() {
-        const folderOptions = document.getElementById("vaultFolderOptions");
-        if (!folderOptions) return;
+    async function saveEncryptedItem(fullItem, existingId = 0) {
+        const encrypted = await window.VaultCrypto.encryptText(
+            vaultKey,
+            JSON.stringify(fullItem)
+        );
 
-        folderOptions.innerHTML = "";
-        knownFolders.forEach((folder) => {
-            const option = document.createElement("option");
-            option.value = folder;
-            folderOptions.appendChild(option);
+        if (!encrypted || !encrypted.encrypted_data || !encrypted.iv) {
+            throw new Error("Encryption failed before save.");
+        }
+
+        await apiFetch("vault_save.php", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                item_id: existingId ? Number(existingId) : 0,
+                item_name: fullItem.item_name,
+                item_type: fullItem.item_type,
+                folder_name: fullItem.folder_name,
+                encrypted_data: encrypted.encrypted_data,
+                iv: encrypted.iv
+            })
         });
+    }
+
+    async function renameFolder(oldFolderName) {
+        if (!vaultKey) {
+            setMessage(pageMessage, "Vault is locked.", "error");
+            return;
+        }
+
+        const newFolderName = window.prompt("Rename folder:", oldFolderName);
+
+        if (newFolderName === null) {
+            return;
+        }
+
+        const trimmed = newFolderName.trim();
+
+        if (!trimmed) {
+            setMessage(pageMessage, "Folder name is required.", "error");
+            return;
+        }
+
+        if (trimmed === oldFolderName) {
+            return;
+        }
+
+        if (knownFolders.includes(trimmed)) {
+            setMessage(pageMessage, "A folder with that name already exists.", "error");
+            return;
+        }
+
+        const matchingItems = items.filter(
+            (item) => (item.folder_name || "").trim() === oldFolderName
+        );
+
+        try {
+            for (const item of matchingItems) {
+                const updatedItem = {
+                    item_name: item.item_name,
+                    item_type: item.item_type,
+                    folder_name: trimmed,
+                    payload: item.payload || {}
+                };
+
+                await saveEncryptedItem(updatedItem, item.id);
+            }
+
+            if (selectedFolder === oldFolderName) {
+                selectedFolder = trimmed;
+            }
+
+            setMessage(pageMessage, `Folder renamed to "${trimmed}".`, "success");
+            await loadItems();
+        } catch (error) {
+            console.error("folder rename error:", error);
+            setMessage(pageMessage, error.message || "Could not rename folder.", "error");
+        }
+    }
+
+    async function deleteFolder(folderName) {
+        if (!vaultKey) {
+            setMessage(pageMessage, "Vault is locked.", "error");
+            return;
+        }
+
+        const matchingItems = items.filter(
+            (item) => (item.folder_name || "").trim() === folderName
+        );
+
+        const confirmed = window.confirm(
+            `Delete folder "${folderName}"? Items will be kept, but removed from this folder.`
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            for (const item of matchingItems) {
+                const updatedItem = {
+                    item_name: item.item_name,
+                    item_type: item.item_type,
+                    folder_name: "",
+                    payload: item.payload || {}
+                };
+
+                await saveEncryptedItem(updatedItem, item.id);
+            }
+
+            if (selectedFolder === folderName) {
+                selectedFolder = "__all__";
+            }
+
+            setMessage(pageMessage, `Folder "${folderName}" deleted.`, "success");
+            await loadItems();
+        } catch (error) {
+            console.error("folder delete error:", error);
+            setMessage(pageMessage, error.message || "Could not delete folder.", "error");
+        }
     }
 
     function renderFolders() {
@@ -397,6 +521,7 @@
             row.style.gap = "8px";
             row.style.alignItems = "center";
             row.style.marginBottom = "8px";
+            row.style.position = "relative";
 
             const selectBtn = document.createElement("button");
             selectBtn.type = "button";
@@ -416,18 +541,84 @@
                 renderItems();
             });
 
+            const menuWrap = document.createElement("div");
+            menuWrap.style.position = "relative";
+            menuWrap.style.flexShrink = "0";
+
+            const menuBtn = document.createElement("button");
+            menuBtn.type = "button";
+            menuBtn.className = "vault-secondary-btn";
+            menuBtn.innerHTML = "&#8942;";
+            menuBtn.style.width = "48px";
+            menuBtn.style.minWidth = "48px";
+            menuBtn.style.padding = "0";
+            menuBtn.style.fontSize = "24px";
+            menuBtn.style.lineHeight = "1";
+            menuBtn.style.display = "flex";
+            menuBtn.style.alignItems = "center";
+            menuBtn.style.justifyContent = "center";
+
+            const dropdown = document.createElement("div");
+            dropdown.className = "hidden folder-action-menu";
+            dropdown.style.position = "absolute";
+            dropdown.style.top = "54px";
+            dropdown.style.right = "0";
+            dropdown.style.minWidth = "140px";
+            dropdown.style.background = "#082235";
+            dropdown.style.border = "1px solid #1b4257";
+            dropdown.style.borderRadius = "14px";
+            dropdown.style.boxShadow = "0 18px 40px rgba(0, 0, 0, 0.35)";
+            dropdown.style.padding = "8px";
+            dropdown.style.zIndex = "100";
+
+            const renameBtn = document.createElement("button");
+            renameBtn.type = "button";
+            renameBtn.className = "vault-action-btn";
+            renameBtn.textContent = "Rename";
+            renameBtn.style.width = "100%";
+            renameBtn.style.display = "block";
+            renameBtn.style.marginBottom = "6px";
+
+            renameBtn.addEventListener("click", async (event) => {
+                event.stopPropagation();
+                dropdown.classList.add("hidden");
+                await renameFolder(folder);
+            });
+
             const deleteBtn = document.createElement("button");
             deleteBtn.type = "button";
             deleteBtn.className = "vault-action-btn danger";
             deleteBtn.textContent = "Delete";
+            deleteBtn.style.width = "100%";
+            deleteBtn.style.display = "block";
 
             deleteBtn.addEventListener("click", async (event) => {
                 event.stopPropagation();
+                dropdown.classList.add("hidden");
                 await deleteFolder(folder);
             });
 
+            menuBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+
+                document.querySelectorAll(".folder-action-menu").forEach((menu) => {
+                    if (menu !== dropdown) {
+                        menu.classList.add("hidden");
+                    }
+                });
+
+                dropdown.classList.toggle("hidden");
+            });
+
+            dropdown.appendChild(renameBtn);
+            dropdown.appendChild(deleteBtn);
+
+            menuWrap.appendChild(menuBtn);
+            menuWrap.appendChild(dropdown);
+
             row.appendChild(selectBtn);
-            row.appendChild(deleteBtn);
+            row.appendChild(menuWrap);
+
             folderList.appendChild(row);
         });
     }
@@ -547,74 +738,6 @@
         items = decrypted;
         updateKnownFolders();
         renderItems();
-    }
-
-    async function saveEncryptedItem(fullItem, existingId = 0) {
-        const encrypted = await window.VaultCrypto.encryptText(
-            vaultKey,
-            JSON.stringify(fullItem)
-        );
-
-        if (!encrypted || !encrypted.encrypted_data || !encrypted.iv) {
-            throw new Error("Encryption failed before save.");
-        }
-
-        await apiFetch("vault_save.php", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                item_id: existingId ? Number(existingId) : 0,
-                item_name: fullItem.item_name,
-                item_type: fullItem.item_type,
-                folder_name: fullItem.folder_name,
-                encrypted_data: encrypted.encrypted_data,
-                iv: encrypted.iv
-            })
-        });
-    }
-
-    async function deleteFolder(folderName) {
-        if (!vaultKey) {
-            setMessage(pageMessage, "Vault is locked.", "error");
-            return;
-        }
-
-        const matchingItems = items.filter(
-            (item) => (item.folder_name || "").trim() === folderName
-        );
-
-        const confirmed = window.confirm(
-            `Delete folder "${folderName}"? Items will be kept, but removed from this folder.`
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
-        try {
-            for (const item of matchingItems) {
-                const updatedItem = {
-                    item_name: item.item_name,
-                    item_type: item.item_type,
-                    folder_name: "",
-                    payload: item.payload || {}
-                };
-
-                await saveEncryptedItem(updatedItem, item.id);
-            }
-
-            if (selectedFolder === folderName) {
-                selectedFolder = "__all__";
-            }
-
-            setMessage(pageMessage, `Folder "${folderName}" deleted.`, "success");
-            await loadItems();
-        } catch (error) {
-            console.error("folder delete error:", error);
-            setMessage(pageMessage, error.message || "Could not delete folder.", "error");
-        }
     }
 
     function openItemModal(existing = null) {
@@ -884,6 +1007,12 @@
             closeFolderModal();
         });
     }
+
+    document.addEventListener("click", () => {
+        document.querySelectorAll(".folder-action-menu").forEach((menu) => {
+            menu.classList.add("hidden");
+        });
+    });
 
     updateTypeFilterButtons();
     updateFolderFilterButtons();
