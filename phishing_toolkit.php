@@ -952,6 +952,39 @@ function analyzePhishingContent(string $content): array
         ];
     }
 
+    $hasSuspiciousUrlThreat = false;
+    $hasHighSuspiciousUrlThreat = false;
+
+    foreach ($riskFindings as $finding) {
+        if (($finding['label'] ?? '') === 'Suspicious URL(s) detected') {
+            $hasSuspiciousUrlThreat = true;
+
+            if (($finding['severity'] ?? '') === 'high') {
+                $hasHighSuspiciousUrlThreat = true;
+            }
+        }
+    }
+
+    if ($hasHighSuspiciousUrlThreat) {
+        return [
+            'message' => 'High likelihood of phishing content detected. One or more submitted links contain multiple suspicious URL indicators.',
+            'severity' => 'high',
+            'matched' => $riskFindings,
+            'legit' => $legitFindings,
+            'score' => $signalCount,
+        ];
+    }
+
+    if ($hasSuspiciousUrlThreat && $score < 4) {
+        return [
+            'message' => 'Potential phishing indicator detected. One or more submitted links contain suspicious URL indicators.',
+            'severity' => 'medium',
+            'matched' => $riskFindings,
+            'legit' => $legitFindings,
+            'score' => $signalCount,
+        ];
+    }
+
     if ($score >= 7) {
         $severity = 'high';
         $message = 'High likelihood of phishing content detected.';
