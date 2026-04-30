@@ -927,6 +927,31 @@ function analyzePhishingContent(string $content): array
         ];
     }
 
+    $hasHomoglyphOrIdnThreat = false;
+
+    foreach ($riskFindings as $finding) {
+        $detailText = strtolower((string) ($finding['detail'] ?? ''));
+
+        if (
+            str_contains($detailText, 'non-ascii characters detected in domain') ||
+            str_contains($detailText, 'punycode/idn domain detected') ||
+            str_contains($detailText, 'unicode domain converts to punycode')
+        ) {
+            $hasHomoglyphOrIdnThreat = true;
+            break;
+        }
+    }
+
+    if ($hasHomoglyphOrIdnThreat && $score < 4) {
+        return [
+            'message' => 'Potential phishing indicator detected. The submitted link uses Unicode, punycode, or IDN characters that can be used for homoglyph impersonation.',
+            'severity' => 'medium',
+            'matched' => $riskFindings,
+            'legit' => $legitFindings,
+            'score' => $signalCount,
+        ];
+    }
+
     if ($score >= 7) {
         $severity = 'high';
         $message = 'High likelihood of phishing content detected.';
