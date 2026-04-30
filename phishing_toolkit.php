@@ -480,7 +480,7 @@ function runAllChecks(string $content): array
         $riskFindings[] = [
             'label' => 'Attachment lure' . ($sev === 'high' ? ' (dangerous file type)' : ''),
             'severity' => $sev,
-            'detail' => 'References file attachments; executable or script extensions are especially risky.'
+            'detail' => 'References file attachments; archive, macro, executable, or script extensions require caution.'
         ];
     }
 
@@ -640,15 +640,7 @@ function runAllChecks(string $content): array
     }
 
     if ($fromDomain !== '' && $replyDomain !== '' && !$senderContext['reply_to_aligned']) {
-        if ($auth['has_failure'] || $hasCredentialLanguage || !empty($urgencyMatches)) {
-            $headerIssues[] = "Reply-To domain ($replyDomain) differs from From domain ($fromDomain)";
-        } else {
-            $legitFindings[] = [
-                'label' => 'Reply-To differs from From',
-                'severity' => 'low',
-                'detail' => "Reply-To uses $replyDomain while From uses $fromDomain. This can be normal for support or ticketing systems."
-            ];
-        }
+        $headerIssues[] = "Reply-To domain ($replyDomain) differs from From domain ($fromDomain)";
     }
 
     if ($fromDomain !== '' && preg_match('/From:\s*"?([^"<\n]+)"?\s*</i', $content, $fromDisplayMatch)) {
@@ -886,10 +878,35 @@ function analyzePhishingContent(string $content): array
         ];
     }
 
+    $hasMediumStructuralSignal = false;
+
+    foreach ($riskFindings as $finding) {
+        $label = strtolower((string) ($finding['label'] ?? ''));
+        $severity = strtolower((string) ($finding['severity'] ?? ''));
+        $detail = strtolower((string) ($finding['detail'] ?? ''));
+
+        if (
+            $severity === 'medium' &&
+            (
+                str_contains($label, 'email header anomalies') ||
+                str_contains($label, 'reply-to') ||
+                str_contains($detail, 'reply-to domain') ||
+                str_contains($label, 'attachment') ||
+                str_contains($label, 'suspicious url') ||
+                str_contains($detail, 'homoglyph') ||
+                str_contains($detail, 'idn') ||
+                str_contains($detail, 'punycode')
+            )
+        ) {
+            $hasMediumStructuralSignal = true;
+            break;
+        }
+    }
+
     if ($score >= 7) {
         $severity = 'high';
         $message = 'High likelihood of phishing content detected.';
-    } elseif ($score >= 4) {
+    } elseif ($score >= 4 || $hasMediumStructuralSignal) {
         $severity = 'medium';
         $message = 'Several phishing indicators were found.';
     } elseif ($score >= 1) {
