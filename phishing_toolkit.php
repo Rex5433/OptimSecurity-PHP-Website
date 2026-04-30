@@ -100,6 +100,35 @@ function detectLookalikeBrandDomain(string $host): string
     return '';
 }
 
+
+function detectHomoglyphOrIdnDomain(string $host): array
+{
+    $host = trim($host);
+    $issues = [];
+
+    if ($host === '') {
+        return $issues;
+    }
+
+    if (preg_match('/[^\\x20-\\x7E]/', $host)) {
+        $issues[] = "Non-ASCII characters detected in domain: $host";
+    }
+
+    if (stripos($host, 'xn--') !== false) {
+        $issues[] = "Punycode/IDN domain detected: $host";
+    }
+
+    if (function_exists('idn_to_ascii')) {
+        $asciiHost = idn_to_ascii($host, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
+
+        if ($asciiHost !== false && strtolower($asciiHost) !== strtolower($host)) {
+            $issues[] = "Unicode domain converts to punycode: $asciiHost";
+        }
+    }
+
+    return array_values(array_unique($issues));
+}
+
 function getTrustedBrandDomains(): array
 {
     return [
@@ -600,6 +629,13 @@ function runAllChecks(string $content): array
 
             if ($host === '') {
                 continue;
+            }
+
+
+            $homoglyphIssues = detectHomoglyphOrIdnDomain($host);
+
+            foreach ($homoglyphIssues as $issue) {
+                $urlIssues[] = $issue;
             }
 
             $isTrustedBrandHost = false;
