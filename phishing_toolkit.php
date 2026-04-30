@@ -129,77 +129,6 @@ function detectHomoglyphOrIdnDomain(string $host): array
     return array_values(array_unique($issues));
 }
 
-function getTrustedBrandDomains(): array
-{
-    return [
-        'microsoft' => ['microsoft.com', 'microsoftonline.com', 'office.com', 'outlook.com', 'live.com', 'sharepointonline.com', 'windows.net'],
-        'office 365' => ['microsoft.com', 'microsoftonline.com', 'office.com', 'outlook.com', 'office365.com'],
-        'outlook' => ['outlook.com', 'microsoft.com', 'microsoftonline.com', 'live.com'],
-        'azure' => ['microsoft.com', 'microsoftonline.com', 'azure.com', 'windows.net'],
-        'onedrive' => ['microsoft.com', 'onedrive.com', 'sharepointonline.com'],
-        'paypal' => ['paypal.com', 'paypalobjects.com'],
-        'amazon' => ['amazon.com', 'amazonaws.com', 'amazonpay.com'],
-        'aws' => ['amazonaws.com', 'aws.amazon.com'],
-        'google' => ['google.com', 'accounts.google.com', 'gmail.com', 'googlemail.com', 'youtube.com', 'withgoogle.com', 'notifications.google.com', 'bounces.google.com'],
-        'gmail' => ['gmail.com', 'google.com', 'accounts.google.com', 'googlemail.com'],
-        'apple' => ['apple.com', 'icloud.com', 'me.com'],
-        'icloud' => ['icloud.com', 'apple.com', 'me.com'],
-        'github' => ['github.com', 'githubusercontent.com', 'githubapp.com', 'githubassets.com', 'github.io', 'noreply.github.com'],
-        'bank of america' => ['bankofamerica.com'],
-        'chase' => ['chase.com'],
-        'wells fargo' => ['wellsfargo.com'],
-        'citibank' => ['citi.com', 'citibank.com'],
-        'irs' => ['irs.gov'],
-        'fedex' => ['fedex.com'],
-        'ups' => ['ups.com'],
-        'dhl' => ['dhl.com'],
-        'usps' => ['usps.com'],
-        'netflix' => ['netflix.com'],
-        'dropbox' => ['dropbox.com'],
-        'docusign' => ['docusign.net', 'docusign.com'],
-        'linkedin' => ['linkedin.com'],
-        'facebook' => ['facebook.com', 'fb.com', 'meta.com', 'facebookmail.com'],
-        'instagram' => ['instagram.com', 'facebookmail.com', 'meta.com'],
-        'twitter' => ['twitter.com', 'x.com'],
-        'x' => ['x.com', 'twitter.com'],
-        'whatsapp' => ['whatsapp.com', 'facebookmail.com', 'meta.com'],
-        'coinbase' => ['coinbase.com'],
-        'binance' => ['binance.com']
-    ];
-}
-
-function findMentionedBrands(string $content): array
-{
-    $brands = array_keys(getTrustedBrandDomains());
-    $matched = [];
-
-    foreach ($brands as $brand) {
-        if (stripos($content, $brand) !== false) {
-            $matched[] = $brand;
-        }
-    }
-
-    return array_values(array_unique($matched));
-}
-
-function domainLooksLegitForBrand(string $brand, string $domain): bool
-{
-    $map = getTrustedBrandDomains();
-    $domain = normalizeHost($domain);
-
-    if ($domain === '' || !isset($map[$brand])) {
-        return false;
-    }
-
-    foreach ($map[$brand] as $trusted) {
-        if (domainMatches($domain, $trusted)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 function parseAuthenticationSignals(string $content): array
 {
     $riskFindings = [];
@@ -272,23 +201,23 @@ function parseAuthenticationSignals(string $content): array
     ];
 }
 
-function getTrustedSenderContext(string $content, array $mentionedBrands, array $auth): array
+function getSenderContext(string $content, array $auth): array
 {
+    $fromEmail = '';
     $fromDomain = '';
     $displayName = '';
     $replyDomain = '';
     $returnPathDomain = '';
     $dkimDomain = '';
     $dmarcFromDomain = '';
-    $trustedBrandMatches = [];
-    $senderTrustedPlatform = false;
 
     if (preg_match('/From:\s*"?([^"<\n]+)"?\s*<([^>]+)>/i', $content, $fromMatch)) {
         $displayName = strtolower(trim($fromMatch[1]));
-        $fromAddr = strtolower(trim($fromMatch[2]));
-        $fromDomain = extractDomainFromEmail($fromAddr);
+        $fromEmail = strtolower(trim($fromMatch[2]));
+        $fromDomain = extractDomainFromEmail($fromEmail);
     } elseif (preg_match('/From:\s*[^\n<]*<?([^>\s\n]+@[^>\s\n]+)>?/i', $content, $fromSimpleMatch)) {
-        $fromDomain = extractDomainFromEmail($fromSimpleMatch[1]);
+        $fromEmail = strtolower(trim($fromSimpleMatch[1]));
+        $fromDomain = extractDomainFromEmail($fromEmail);
     }
 
     if (preg_match('/Reply-To:\s*[^\n<]*<?([^>\s\n]+@[^>\s\n]+)>?/i', $content, $replyMatch)) {
@@ -307,55 +236,47 @@ function getTrustedSenderContext(string $content, array $mentionedBrands, array 
         $dmarcFromDomain = normalizeHost($dmarcMatch[1]);
     }
 
-    if ($fromDomain !== '') {
-        foreach (getTrustedBrandDomains() as $brand => $trustedDomains) {
-            if (
-                domainLooksLegitForBrand($brand, $fromDomain) ||
-                ($dkimDomain !== '' && domainLooksLegitForBrand($brand, $dkimDomain)) ||
-                ($dmarcFromDomain !== '' && domainLooksLegitForBrand($brand, $dmarcFromDomain)) ||
-                ($returnPathDomain !== '' && domainLooksLegitForBrand($brand, $returnPathDomain))
-            ) {
-                $senderTrustedPlatform = true;
+    $dkimAligned = $fromDomain !== '' && $dkimDomain !== '' && (
+        domainMatches($fromDomain, $dkimDomain) || domainMatches($dkimDomain, $fromDomain)
+    );
 
-                if (
-                    stripos($content, $brand) !== false ||
-                    stripos($displayName, $brand) !== false ||
-                    in_array($brand, $mentionedBrands, true)
-                ) {
-                    $trustedBrandMatches[] = $brand;
-                }
-            }
-        }
-    }
+    $dmarcAligned = $fromDomain !== '' && $dmarcFromDomain !== '' && (
+        domainMatches($fromDomain, $dmarcFromDomain) || domainMatches($dmarcFromDomain, $fromDomain)
+    );
 
-    $trustedBrandMatches = array_values(array_unique($trustedBrandMatches));
+    $returnPathAligned = $fromDomain !== '' && $returnPathDomain !== '' && (
+        domainMatches($fromDomain, $returnPathDomain) || domainMatches($returnPathDomain, $fromDomain)
+    );
+
+    $replyToAligned = $fromDomain !== '' && $replyDomain !== '' && (
+        domainMatches($fromDomain, $replyDomain) || domainMatches($replyDomain, $fromDomain)
+    );
 
     $strongAlignedAuth = (
         !$auth['has_failure'] &&
-        $auth['passes'] >= 3 &&
+        $auth['passes'] >= 2 &&
         $fromDomain !== '' &&
-        (
-            ($dkimDomain !== '' && domainMatches($fromDomain, $dkimDomain)) ||
-            ($dmarcFromDomain !== '' && domainMatches($fromDomain, $dmarcFromDomain))
-        )
+        ($dkimAligned || $dmarcAligned)
     );
 
-    $confirmedLegit = $strongAlignedAuth && ($senderTrustedPlatform || !empty($trustedBrandMatches));
+    $confirmedLegit = $strongAlignedAuth;
 
     return [
+        'from_email' => $fromEmail,
         'from_domain' => $fromDomain,
         'display_name' => $displayName,
         'reply_domain' => $replyDomain,
         'return_path_domain' => $returnPathDomain,
         'dkim_domain' => $dkimDomain,
         'dmarc_from_domain' => $dmarcFromDomain,
-        'trusted_brand_matches' => $trustedBrandMatches,
-        'trusted_platform' => $senderTrustedPlatform,
+        'dkim_aligned' => $dkimAligned,
+        'dmarc_aligned' => $dmarcAligned,
+        'return_path_aligned' => $returnPathAligned,
+        'reply_to_aligned' => $replyToAligned,
         'strong_aligned_auth' => $strongAlignedAuth,
         'confirmed_legit' => $confirmedLegit,
     ];
 }
-
 
 function checkGoogleSafeBrowsing(array $urls): array
 {
@@ -446,18 +367,13 @@ function runAllChecks(string $content): array
     $legitFindings = array_merge($legitFindings, $auth['legit']);
     $riskFindings = array_merge($riskFindings, $auth['risk']);
 
-    $brands = findMentionedBrands($content);
-    $trustedSender = getTrustedSenderContext($content, $brands, $auth);
+    $senderContext = getSenderContext($content, $auth);
 
-    if ($trustedSender['confirmed_legit']) {
-        $brandText = !empty($trustedSender['trusted_brand_matches'])
-            ? implode(', ', $trustedSender['trusted_brand_matches'])
-            : $trustedSender['from_domain'];
-
+    if ($senderContext['strong_aligned_auth']) {
         $legitFindings[] = [
-            'label' => 'Trusted sender identified',
+            'label' => 'Authenticated aligned sender',
             'severity' => 'low',
-            'detail' => 'Sender domain and authentication signals align with a trusted source: ' . $brandText
+            'detail' => 'SPF/DKIM/DMARC authentication signals pass and the signing domain aligns with the visible From domain: ' . $senderContext['from_domain']
         ];
     }
 
@@ -476,7 +392,7 @@ function runAllChecks(string $content): array
         }
     }
 
-    if ($urgencyMatches && !$trustedSender['confirmed_legit']) {
+    if ($urgencyMatches && !$senderContext['confirmed_legit']) {
         $sev = count($urgencyMatches) >= 3 ? 'high' : 'medium';
         $riskFindings[] = [
             'label' => 'Urgency / threat language',
@@ -490,7 +406,7 @@ function runAllChecks(string $content): array
         provide your (details|information|credentials)|update your (payment|billing|card)|
         your (password|pin|card number) (has expired|is required|needs to be updated)/ix', $content) === 1;
 
-    if ($hasCredentialLanguage && !$trustedSender['confirmed_legit']) {
+    if ($hasCredentialLanguage && !$senderContext['confirmed_legit']) {
         $riskFindings[] = [
             'label' => 'Credential or sensitive data request',
             'severity' => 'high',
@@ -515,17 +431,13 @@ function runAllChecks(string $content): array
         unauthorized (access|login|sign.?in)|someone tried to (access|sign into)|
         your account (has been|will be) (suspended|locked|disabled|closed)/ix', $content) === 1;
 
-    if ($hasAccountThreatLanguage && !$trustedSender['confirmedLegit'] ?? false) {
-        // unreachable safeguard
-    }
-
-    if ($hasAccountThreatLanguage && !$trustedSender['confirmed_legit']) {
+    if ($hasAccountThreatLanguage && !$senderContext['confirmed_legit']) {
         $riskFindings[] = [
             'label' => 'Account threat or security alert',
             'severity' => 'medium',
             'detail' => 'Claims of account compromise or suspension to create panic.'
         ];
-    } elseif ($hasAccountThreatLanguage && $trustedSender['confirmed_legit']) {
+    } elseif ($hasAccountThreatLanguage && $senderContext['confirmed_legit']) {
         $legitFindings[] = [
             'label' => 'Legitimate security/account notice language',
             'severity' => 'low',
@@ -537,13 +449,13 @@ function runAllChecks(string $content): array
         review now|tap (below|here)|download (now|here)|view (attachment|document)|
         access (your account|here)|confirm (here|now|your account)|disconnect email/ix', $content) === 1;
 
-    if ($hasCallToAction && !$trustedSender['confirmed_legit']) {
+    if ($hasCallToAction && !$senderContext['confirmed_legit']) {
         $riskFindings[] = [
             'label' => 'Manipulative call-to-action',
             'severity' => 'medium',
             'detail' => 'Pressures the reader to click a link or open an attachment immediately.'
         ];
-    } elseif ($hasCallToAction && $trustedSender['confirmed_legit']) {
+    } elseif ($hasCallToAction && $senderContext['confirmed_legit']) {
         $legitFindings[] = [
             'label' => 'Normal action link in trusted message',
             'severity' => 'low',
@@ -553,7 +465,7 @@ function runAllChecks(string $content): array
 
     if (preg_match('/mfa code|verification code|one.?time (code|password|pin)|
         2fa code|authenticator code|otp|passcode sent to|enter the code|
-        do not share (this|your) code/ix', $content) && !$trustedSender['confirmed_legit']) {
+        do not share (this|your) code/ix', $content) && !$senderContext['confirmed_legit']) {
         $riskFindings[] = [
             'label' => 'MFA or one-time code request',
             'severity' => 'high',
@@ -569,14 +481,6 @@ function runAllChecks(string $content): array
             'label' => 'Attachment lure' . ($sev === 'high' ? ' (dangerous file type)' : ''),
             'severity' => $sev,
             'detail' => 'References file attachments; executable or script extensions are especially risky.'
-        ];
-    }
-
-    if (!empty($brands) && ($hasCredentialLanguage || !empty($urgencyMatches)) && !$trustedSender['confirmed_legit']) {
-        $riskFindings[] = [
-            'label' => 'Brand-related social engineering',
-            'severity' => 'medium',
-            'detail' => 'Mentions brand(s) alongside urgency or credential requests: ' . implode(', ', $brands)
         ];
     }
 
@@ -638,14 +542,6 @@ function runAllChecks(string $content): array
                 $urlIssues[] = $issue;
             }
 
-            $isTrustedBrandHost = false;
-            foreach ($brands as $brand) {
-                if (domainLooksLegitForBrand($brand, $host)) {
-                    $isTrustedBrandHost = true;
-                    break;
-                }
-            }
-
             if (preg_match('/^\d{1,3}(\.\d{1,3}){3}$/', $host)) {
                 $urlIssues[] = "IP address used as domain ($host)";
             }
@@ -671,7 +567,7 @@ function runAllChecks(string $content): array
             }
 
             $parts = explode('.', $host);
-            if (count($parts) >= 5 && !$isTrustedBrandHost) {
+            if (count($parts) >= 5) {
                 $urlIssues[] = "Excessive subdomain depth in URL: $host";
             }
 
@@ -688,14 +584,10 @@ function runAllChecks(string $content): array
             }
 
             if (($parsed['scheme'] ?? '') === 'http') {
-                if ($isTrustedBrandHost) {
-                    $urlIssues[] = "Insecure HTTP link for brand domain: $host";
-                } else {
-                    $urlIssues[] = "Insecure HTTP link used: $host";
-                }
+                $urlIssues[] = "Insecure HTTP link used: $host";
             }
 
-            if ($isTrustedBrandHost && ($parsed['scheme'] ?? '') === 'https') {
+            if (($parsed['scheme'] ?? '') === 'https' && empty($urlIssues)) {
                 $legitUrlNotes[] = $host;
             }
         }
@@ -709,45 +601,46 @@ function runAllChecks(string $content): array
             ];
         } elseif (!empty($legitUrlNotes)) {
             $legitFindings[] = [
-                'label' => 'Trusted destination links',
+                'label' => 'HTTPS destination links',
                 'severity' => 'low',
-                'detail' => 'Links point to expected trusted domains over HTTPS: ' . implode(', ', array_unique($legitUrlNotes))
+                'detail' => 'No URL reputation or structure issues were detected for HTTPS link(s): ' . implode(', ', array_unique($legitUrlNotes))
             ];
         }
     }
 
     $headerIssues = [];
-    $fromDomain = $trustedSender['from_domain'];
-    $replyDomain = $trustedSender['reply_domain'];
-    $displayBrandMatches = [];
+    $fromDomain = $senderContext['from_domain'];
+    $replyDomain = $senderContext['reply_domain'];
+    $returnPathDomain = $senderContext['return_path_domain'];
+    $dkimDomain = $senderContext['dkim_domain'];
+    $dmarcFromDomain = $senderContext['dmarc_from_domain'];
 
-    if (preg_match('/From:\s*"?([^"<\n]+)"?\s*<([^>]+)>/i', $content, $fromMatch)) {
-        $displayName = strtolower(trim($fromMatch[1]));
+    if ($fromDomain !== '' && !$auth['has_failure'] && $auth['passes'] === 0) {
+        $headerIssues[] = 'No SPF, DKIM, or DMARC authentication results were found in the pasted headers';
+    }
 
-        foreach ($brands as $brand) {
-            if (stripos($displayName, $brand) !== false) {
-                $displayBrandMatches[] = $brand;
-            }
-        }
+    if ($fromDomain !== '' && $dkimDomain !== '' && !$senderContext['dkim_aligned']) {
+        $headerIssues[] = "DKIM signing domain ($dkimDomain) does not align with From domain ($fromDomain)";
+    }
 
-        foreach (array_unique($displayBrandMatches) as $brand) {
-            if (!domainLooksLegitForBrand($brand, $fromDomain)) {
-                if ($auth['has_failure'] || $hasCredentialLanguage || !empty($urgencyMatches)) {
-                    $headerIssues[] = "Display name claims to be \"$brand\" but sender domain is \"$fromDomain\"";
-                }
-            } else {
-                $legitFindings[] = [
-                    'label' => 'Sender domain matches visible brand',
-                    'severity' => 'low',
-                    'detail' => "Display name and sender domain align for $brand ($fromDomain)."
-                ];
-            }
+    if ($fromDomain !== '' && $dmarcFromDomain !== '' && !$senderContext['dmarc_aligned']) {
+        $headerIssues[] = "DMARC header.from domain ($dmarcFromDomain) does not align with From domain ($fromDomain)";
+    }
+
+    if ($fromDomain !== '' && $returnPathDomain !== '' && !$senderContext['return_path_aligned']) {
+        if ($auth['has_failure'] || $hasCredentialLanguage || !empty($urgencyMatches)) {
+            $headerIssues[] = "Return-Path domain ($returnPathDomain) differs from From domain ($fromDomain)";
+        } else {
+            $legitFindings[] = [
+                'label' => 'Return-Path differs from From',
+                'severity' => 'low',
+                'detail' => "Return-Path uses $returnPathDomain while From uses $fromDomain. This can be normal for mailing platforms, but should be reviewed with the rest of the message."
+            ];
         }
     }
 
-    if ($fromDomain !== '' && $replyDomain !== '' && $fromDomain !== $replyDomain) {
-        $replyToSeverity = ($auth['has_failure'] || $hasCredentialLanguage || !empty($urgencyMatches)) ? 'medium' : 'low';
-        if ($replyToSeverity === 'medium' && !$trustedSender['confirmed_legit']) {
+    if ($fromDomain !== '' && $replyDomain !== '' && !$senderContext['reply_to_aligned']) {
+        if ($auth['has_failure'] || $hasCredentialLanguage || !empty($urgencyMatches)) {
             $headerIssues[] = "Reply-To domain ($replyDomain) differs from From domain ($fromDomain)";
         } else {
             $legitFindings[] = [
@@ -755,6 +648,23 @@ function runAllChecks(string $content): array
                 'severity' => 'low',
                 'detail' => "Reply-To uses $replyDomain while From uses $fromDomain. This can be normal for support or ticketing systems."
             ];
+        }
+    }
+
+    if ($fromDomain !== '' && preg_match('/From:\s*"?([^"<\n]+)"?\s*</i', $content, $fromDisplayMatch)) {
+        $displayName = strtolower(trim($fromDisplayMatch[1]));
+
+        if (preg_match('/\b(security|support|billing|account|admin|helpdesk|verification|verify|password)\b/i', $displayName)) {
+            if (!$senderContext['strong_aligned_auth'] && ($hasCredentialLanguage || !empty($urgencyMatches) || $auth['has_failure'])) {
+                $headerIssues[] = "Sensitive sender display name used without strong aligned authentication: $displayName";
+            }
+        }
+
+        if (preg_match('/([a-z0-9.-]+\.[a-z]{2,})/i', $displayName, $displayDomainMatch)) {
+            $displayDomain = normalizeHost($displayDomainMatch[1]);
+            if ($displayDomain !== '' && !domainMatches($fromDomain, $displayDomain) && !domainMatches($displayDomain, $fromDomain)) {
+                $headerIssues[] = "Display name references $displayDomain but From domain is $fromDomain";
+            }
         }
     }
 
@@ -777,7 +687,7 @@ function runAllChecks(string $content): array
             return $decoded !== false && preg_match('/[a-zA-Z]{4,}/', $decoded);
         });
 
-        if (count($validBase64) >= 5 && !$trustedSender['confirmed_legit']) {
+        if (count($validBase64) >= 5 && !$senderContext['confirmed_legit']) {
             $encIssues[] = 'Multiple base64-encoded blocks detected';
         }
     }
@@ -786,7 +696,7 @@ function runAllChecks(string $content): array
         $encIssues[] = 'Punycode (IDN) domain detected';
     }
 
-    if (preg_match_all('/&#\d+;/', $content, $entities) && count($entities[0]) > 8 && !$trustedSender['confirmed_legit']) {
+    if (preg_match_all('/&#\d+;/', $content, $entities) && count($entities[0]) > 8 && !$senderContext['confirmed_legit']) {
         $encIssues[] = 'Extensive HTML entity encoding detected';
     }
 
@@ -814,16 +724,6 @@ function runAllChecks(string $content): array
                 $anchorIssues[] = "Link text shows $anchorHost but href points to $hrefHost";
             }
         }
-
-        foreach ($brands as $brand) {
-            if (stripos($anchorText, $brand) !== false) {
-                $hrefHost = normalizeHost((string) (parse_url($href, PHP_URL_HOST) ?? ''));
-                if ($hrefHost !== '' && !domainLooksLegitForBrand($brand, $hrefHost)) {
-                    $anchorIssues[] = "Link text mentions $brand but goes to $hrefHost";
-                    break;
-                }
-            }
-        }
     }
 
     if (!empty($anchorIssues)) {
@@ -844,7 +744,7 @@ function runAllChecks(string $content): array
     if (preg_match('/do the needful|revert back to us|at the earliest/i', $content)) {
         $grammarFlags[] = 'Non-idiomatic phrasing often seen in phishing templates';
     }
-    if (!empty($grammarFlags) && !$trustedSender['confirmed_legit']) {
+    if (!empty($grammarFlags) && !$senderContext['confirmed_legit']) {
         $riskFindings[] = [
             'label' => 'Impersonation / template language signals',
             'severity' => 'low',
@@ -857,8 +757,8 @@ function runAllChecks(string $content): array
         'legit' => $legitFindings,
         'auth_passes' => $auth['passes'],
         'auth_failed' => $auth['has_failure'],
-        'trusted_sender' => $trustedSender['confirmed_legit'],
-        'strong_aligned_auth' => $trustedSender['strong_aligned_auth'],
+        'authenticated_sender' => $senderContext['strong_aligned_auth'],
+        'strong_aligned_auth' => $senderContext['strong_aligned_auth'],
     ];
 }
 
@@ -869,19 +769,20 @@ function analyzePhishingContent(string $content): array
     $legitFindings = $results['legit'];
 
     if (
-        $results['trusted_sender'] &&
+        empty($riskFindings) &&
+        $results['authenticated_sender'] &&
         !$results['auth_failed'] &&
-        $results['auth_passes'] >= 3 &&
+        $results['auth_passes'] >= 2 &&
         $results['strong_aligned_auth']
     ) {
         $legitFindings[] = [
-            'label' => 'Verified trusted sender (strong)',
+            'label' => 'Verified authenticated sender',
             'severity' => 'low',
-            'detail' => 'SPF, DKIM, and DMARC all passed and aligned with a trusted sender domain.'
+            'detail' => 'Email authentication passed and aligned with the visible From domain. This is not a guarantee, but it is a strong legitimacy signal.'
         ];
 
         return [
-            'message' => 'This email appears legitimate. It comes from a trusted sender and passed strong email authentication checks.',
+            'message' => 'This email appears lower risk based on aligned SPF/DKIM/DMARC authentication and no major phishing indicators.',
             'severity' => 'low',
             'matched' => [],
             'legit' => $legitFindings,
@@ -902,7 +803,7 @@ function analyzePhishingContent(string $content): array
         $score = max(0, $score - 2);
     }
 
-    if ($results['trusted_sender']) {
+    if ($results['authenticated_sender']) {
         $score = max(0, $score - 2);
     }
 
