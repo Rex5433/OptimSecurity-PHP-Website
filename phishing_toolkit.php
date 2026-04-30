@@ -51,6 +51,55 @@ function domainMatches(string $domain, string $trusted): bool
     return $domain === $trusted || str_ends_with($domain, '.' . $trusted);
 }
 
+function detectLookalikeBrandDomain(string $host): string
+{
+    $host = normalizeHost($host);
+
+    if ($host === '') {
+        return '';
+    }
+
+    $parts = explode('.', $host);
+
+    if (count($parts) < 2) {
+        return '';
+    }
+
+    $mainLabel = $parts[count($parts) - 2];
+
+    $brands = [
+        'paypal', 'amazon', 'google', 'microsoft', 'apple',
+        'facebook', 'instagram', 'linkedin', 'netflix',
+        'dropbox', 'docusign', 'github'
+    ];
+
+    $normalized = strtr($mainLabel, [
+        '0' => 'o',
+        '1' => 'l',
+        '3' => 'e',
+        '4' => 'a',
+        '5' => 's',
+        '7' => 't',
+        '8' => 'b'
+    ]);
+
+    foreach ($brands as $brand) {
+        if ($mainLabel !== $brand && $normalized === $brand) {
+            return $brand;
+        }
+    }
+
+    if ($mainLabel === 'rnicrosoft') {
+        return 'microsoft';
+    }
+
+    if ($mainLabel === 'arnazon') {
+        return 'amazon';
+    }
+
+    return '';
+}
+
 function getTrustedBrandDomains(): array
 {
     return [
@@ -538,13 +587,10 @@ function runAllChecks(string $content): array
         $legitUrlNotes = [];
 
         $suspiciousTlds = ['\.tk$', '\.ml$', '\.ga$', '\.cf$', '\.gq$', '\.top$', '\.xyz$', '\.click$', '\.loan$', '\.work$', '\.date$', '\.racing$', '\.download$', '\.win$', '\.bid$'];
-        $shorteners = ['bit\.ly', 'tinyurl\.com', 'goo\.gl', 't\.co', 'ow\.ly', 'buff\.ly', 'rebrand\.ly', 'tiny\.cc', 'is\.gd', 'cutt\.ly', 'shorturl\.at', 'rb\.gy', 'bl\.ink'];
-        $lookalikeBrands = [
-            'paypa[l1]', 'payp4l', 'arnazon', 'amaz[o0]n', 'g[o0][o0]gle',
-            'micr[o0]s[o0]ft', 'microsofl', 'app1e', 'appl[e3]\.(?!com)',
-            'faceb[o0][o0]k', 'instagramm', 'linkedln', 'linked1n',
-            'netf1ix', 'netfl1x', 'dropb[o0]x', 'doc[u0]sign',
-            'githu[b8]', 'gitnub', 'g1thub'
+        $shorteners = [
+            'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 'buff.ly',
+            'rebrand.ly', 'tiny.cc', 'is.gd', 'cutt.ly', 'shorturl.at',
+            'rb.gy', 'bl.ink'
         ];
 
         foreach ($urls as $url) {
@@ -575,18 +621,17 @@ function runAllChecks(string $content): array
                 }
             }
 
-            foreach ($shorteners as $s) {
-                if (preg_match('/' . $s . '/i', $host)) {
+            foreach ($shorteners as $shortenerDomain) {
+                if (domainMatches($host, $shortenerDomain)) {
                     $urlIssues[] = "URL shortener used ($host)";
                     break;
                 }
             }
 
-            foreach ($lookalikeBrands as $pattern) {
-                if (preg_match('/' . $pattern . '/i', $host)) {
-                    $urlIssues[] = "Lookalike brand domain: $host";
-                    break;
-                }
+            $lookalikeBrand = detectLookalikeBrandDomain($host);
+
+            if ($lookalikeBrand !== '') {
+                $urlIssues[] = "Lookalike brand domain for $lookalikeBrand: $host";
             }
 
             $parts = explode('.', $host);
@@ -826,6 +871,25 @@ function analyzePhishingContent(string $content): array
     }
 
     $signalCount = count($riskFindings);
+
+    $hasSafeBrowsingThreat = false;
+
+    foreach ($riskFindings as $finding) {
+        if (($finding['label'] ?? '') === 'Google Safe Browsing threat match') {
+            $hasSafeBrowsingThreat = true;
+            break;
+        }
+    }
+
+    if ($hasSafeBrowsingThreat) {
+        return [
+            'message' => 'High likelihood of phishing content detected. Google Safe Browsing flagged one or more submitted URLs.',
+            'severity' => 'high',
+            'matched' => $riskFindings,
+            'legit' => $legitFindings,
+            'score' => $signalCount,
+        ];
+    }
 
     if ($score >= 7) {
         $severity = 'high';
