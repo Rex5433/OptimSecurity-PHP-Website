@@ -278,6 +278,87 @@ function getTrustedSenderContext(string $content, array $mentionedBrands, array 
     ];
 }
 
+
+function checkGoogleSafeBrowsing(array $urls): array
+{
+    $apiKey = getenv("SAFE_BROWSING_API_KEY");
+
+    if (!$apiKey || empty($urls) || !function_exists('curl_init')) {
+        return [];
+    }
+
+    $entries = [];
+
+    foreach ($urls as $url) {
+        $url = trim((string) $url);
+
+        if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
+            continue;
+        }
+
+        $entries[] = [
+            "url" => $url
+        ];
+    }
+
+    if (empty($entries)) {
+        return [];
+    }
+
+    $payload = [
+        "client" => [
+            "clientId" => "optimsecurity",
+            "clientVersion" => "1.0"
+        ],
+        "threatInfo" => [
+            "threatTypes" => [
+                "MALWARE",
+                "SOCIAL_ENGINEERING",
+                "UNWANTED_SOFTWARE",
+                "POTENTIALLY_HARMFUL_APPLICATION"
+            ],
+            "platformTypes" => [
+                "ANY_PLATFORM"
+            ],
+            "threatEntryTypes" => [
+                "URL"
+            ],
+            "threatEntries" => $entries
+        ]
+    ];
+
+    $ch = curl_init(
+        "https://safebrowsing.googleapis.com/v4/threatMatches:find?key=" . urlencode($apiKey)
+    );
+
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            "Content-Type: application/json"
+        ],
+        CURLOPT_POSTFIELDS => json_encode($payload),
+        CURLOPT_TIMEOUT => 8
+    ]);
+
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($response === false || $error || $statusCode < 200 || $statusCode >= 300) {
+        return [];
+    }
+
+    $data = json_decode($response, true);
+
+    if (!is_array($data)) {
+        return [];
+    }
+
+    return $data["matches"] ?? [];
+}
+
 function runAllChecks(string $content): array
 {
     $riskFindings = [];
@@ -425,6 +506,32 @@ function runAllChecks(string $content): array
     $urls = $urlMatches[0] ?? [];
     preg_match_all('/href=["\']?(https?:\/\/[^\s\'"<>]+)/i', $content, $hrefMatches);
     $urls = array_unique(array_merge($urls, $hrefMatches[1] ?? []));
+
+    $safeBrowsingMatches = checkGoogleSafeBrowsing($urls);
+
+    if (!empty($safeBrowsingMatches)) {
+        $badUrls = [];
+        $threatTypes = [];
+
+        foreach ($safeBrowsingMatches as $match) {
+            $badUrls[] = $match["threat"]["url"] ?? "Unknown URL";
+
+            if (!empty($match["threatType"])) {
+                $threatTypes[] = $match["threatType"];
+            }
+        }
+
+        $threatText = !empty($threatTypes)
+            ? " Threat type(s): " . implode(", ", array_unique($threatTypes)) . "."
+            : "";
+
+        $riskFindings[] = [
+            "label" => "Google Safe Browsing threat match",
+            "severity" => "high",
+            "detail" => "Google Safe Browsing flagged the following URL(s): " . implode(", ", array_unique($badUrls)) . "." . $threatText
+        ];
+    }
+
 
     if (!empty($urls)) {
         $urlIssues = [];
